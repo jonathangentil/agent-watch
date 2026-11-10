@@ -7,7 +7,7 @@ name = "alethe-tui"
 version = "0.1.0"
 description = "Monitor local de agentes Alethe, Claude Code e Codex"
 requires-python = ">=3.11"
-dependencies = ["textual>=0.89"]
+dependencies = ["textual==8.2.8"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-asyncio>=0.24"]
