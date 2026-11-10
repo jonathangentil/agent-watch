@@ -3,6 +3,8 @@ from pathlib import Path
 
 from ..model import Agent, Event, Execution, ScanResult
 from ._io import JsonCache, NativeFile, bounded_text, discover, mapping, public_blocks, safe_text, sequence, stable_id, string
+from ._metadata import ROLE_NAMES, identify_role
+from ._usage import reported_tokens
 
 
 class ClaudeAdapter:
@@ -36,12 +38,25 @@ class ClaudeAdapter:
             facts["evidence"] = evidence + ("/end_turn" if facts["status"] == "turn_complete" else "; estado não confirmado")
             if facts["status"] == "turn_complete":
                 file.events.append((offset, "result_available", timestamp, evidence + "/end_turn", string(row.get("uuid")), None, False))
+            usage = mapping(message.get('usage'))
+            message_id = string(message.get('id')) or string(row.get('uuid'))
+            if kind == 'assistant' and message_id:
+                usages = facts.setdefault('usage_by_message', {})
+                allowed = {'input_tokens','output_tokens','cache_read_input_tokens','cache_creation_input_tokens','total_tokens'}
+                usages[message_id] = {**usages.get(message_id, {}), **{key: value for key, value in usage.items() if key in allowed}}
+                if len(usages) > 2000:
+                    usages.pop(next(iter(usages)))
+                    facts['usage_partial'] = True
+            elif kind == 'assistant':
+                facts['usage_partial'] = True
             if message.get("channel") in ("analysis", "reasoning", "thinking"):
                 return
-            if kind == "user" and not row.get("isMeta") and not facts.get("task"):
+            if kind == "user" and not row.get("isMeta"):
                 content = message.get("content")
                 blocks = content if isinstance(content, str) else [block for block in sequence(content) if mapping(block).get("type") == "text"]
-                facts["task"] = bounded_text(safe_text("\n".join(public_blocks(blocks))))
+                task = bounded_text(safe_text("\n".join(public_blocks(blocks))))
+                if task:
+                    facts['task'] = task
             for index, block in enumerate(sequence(message.get("content"))):
                 block = mapping(block)
                 if block.get("channel") in ("analysis", "reasoning", "thinking"):
@@ -97,13 +112,19 @@ class ClaudeAdapter:
             tool_id = string(meta.get("toolUseId"))
             owner = owners.get((session, tool_id))
             parent_id = owner[0] if owner else "claude:" + session
+            role, role_evidence = identify_role(string(meta.get('agentType')), facts.get('task', ''))
+            counts = [reported_tokens(usage) for usage in facts.get('usage_by_message', {}).values()]
+            reported = [value for value in counts if value is not None]
             agent = Agent(
                 id=agent_id, source="claude", source_id=identity,
                 # sessionId in a sidechain is the *parent* session, not this agent's identity.
                 session_id=identity, execution_id=execution_id,
-                project_id=cwd or execution_id + ":unknown-project", name=safe_text(meta.get("agentType")) or safe_text(identity),
+                project_id=cwd or execution_id + ":unknown-project", name=ROLE_NAMES.get(role) or safe_text(meta.get("agentType")) or safe_text(identity),
+                role=role, role_evidence=f'{path.with_suffix(".meta.json") if role_evidence == "função declarada nos metadados" else path}: {role_evidence}' if role else '',
                 parent_id=parent_id, provider="claude", model=facts.get("model"), cwd=cwd,
                 task=facts.get("task", ""),
+                tokens=sum(reported) if reported else None,
+                tokens_partial=file.cursor.initial_skipped or facts.get('usage_partial', False) or len(reported) < len(counts),
                 status=facts.get("status", "unknown"), finished_at=facts.get("finished"), last_activity=facts.get("activity"),
                 evidence=facts.get("evidence", "estado não confirmado"), output_path=str(path),
                 result_path=str(path) if facts.get("status") == "turn_complete" else None)

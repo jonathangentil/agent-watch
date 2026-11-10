@@ -1,0 +1,25 @@
+/* Original theme is unchanged. Aura-inspired variant: near-black, purple and mint.
+   Reference: https://github.com/daltonmenezes/aura-theme */
+.theme-control{display:flex;flex-direction:column;gap:4px;font-size:9px;letter-spacing:1px;color:var(--muted)}
+.theme-control select{height:34px;min-width:130px;font-size:11px;letter-spacing:0}
+:root[data-theme=aura]{color-scheme:dark;--bg:#08070b;--surface:#121018;--theme-line:#332b42;--theme-muted:#a9a2ba;--line:var(--theme-line);--muted:var(--theme-muted);--text:#ede9f5;--green:#61ffca;--blue:#a277ff;--amber:#ffca85;--red:#ff8585;--field:#0d0b12;--selected:#272034;--chrome:#18141f;--panel:#0c0a11;--room-floor:#100d18;--room-grid:#1e192b;--room-wall:#16121f;--room-base:#08070b;--room-trim:#30263f;--room-window-frame:#08070b;--room-window:#38304f;--room-window-bar:#211a30;--room-leader:#171121;--room-leader-border:#675182;--room-desk:#645974;--room-desk-edge:#3d334c;--room-desk-leg:#30283c;--room-monitor:#08070b;--room-screen-off:#211a2d;--room-screen-on:#314c45;--room-code:#61ffca;--room-title:#ede9f5;--room-muted:#b7abc9}
+:root[data-theme=light]{color-scheme:light;--bg:#f4f6f8;--surface:#ffffff;--theme-line:#c9d1da;--theme-muted:#536170;--line:var(--theme-line);--muted:var(--theme-muted);--text:#25313c;--green:#356640;--blue:#6040a0;--amber:#865400;--red:#a53232;--field:#ffffff;--selected:#e7edf5;--chrome:#e7ecf1;--panel:#ffffff;--room-floor:#e5e9e0;--room-grid:#cfd7c9;--room-wall:#f5f4ec;--room-base:#a2af9a;--room-trim:#c1cdb7;--room-window-frame:#a5bba8;--room-window:#cee7e3;--room-window-bar:#8ba995;--room-leader:#d8e3d3;--room-leader-border:#8a9e80;--room-desk:#d0b58c;--room-desk-edge:#aa926c;--room-desk-leg:#917d60;--room-monitor:#45534c;--room-screen-off:#7f988b;--room-screen-on:#37684e;--room-code:#d5f2bd;--room-title:#25382b;--room-muted:#435d49}
+:root:is([data-theme=aura],[data-theme=light]) select,
+:root:is([data-theme=aura],[data-theme=light]) input[type=search]{background:var(--field);border-color:var(--line)}
+:root:is([data-theme=aura],[data-theme=light]) input[type=checkbox]{accent-color:var(--green)}
+:root:is([data-theme=aura],[data-theme=light]) .terminal{--line:var(--theme-line);--muted:var(--theme-muted);background:var(--panel);border-color:var(--line)}
+:root:is([data-theme=aura],[data-theme=light]) :is(.details,.office-window){background:var(--panel);border-color:var(--line)}
+:root:is([data-theme=aura],[data-theme=light]) :is(.chrome,.office-title){background:var(--chrome);color:var(--text);border-color:var(--line)}
+:root:is([data-theme=aura],[data-theme=light]) :is(.scene-head,.office-toolbar){background:var(--surface);border-color:var(--line)}
+:root:is([data-theme=aura],[data-theme=light]) .scene{background:var(--room-floor)}
+:root:is([data-theme=aura],[data-theme=light]) :is(.office-title span:first-child,#last-event,.detail-task,#output){color:var(--text)}
+:root:is([data-theme=aura],[data-theme=light]) :is(.detail-top,.detail-tabs,.detail-footer,td,.badge,.view-toggle){border-color:var(--line)}
+:root:is([data-theme=aura],[data-theme=light]) .leader-line{color:var(--blue)}
+:root:is([data-theme=aura],[data-theme=light]) :is(.run.selected,tbody tr.selected,.view-toggle button[aria-selected=true]){background:var(--selected);color:var(--text);border-color:var(--blue)}
+:root:is([data-theme=aura],[data-theme=light]) tbody tr:hover{background:var(--chrome)}
+:root:is([data-theme=aura],[data-theme=light]) button:hover{border-color:var(--blue)}
+:root[data-theme=light] .sprite .halo{stroke:#6040a0}
+:root[data-theme=light] .interaction-line{stroke:#6040a0}
+:root[data-theme=light] .packet{stroke:#6040a0;stroke-width:1}
+:root[data-theme=light] .sprite text{fill:#356640}
+@media(max-width:650px){.theme-control{flex:1}.theme-control select{min-width:110px;width:100%}}

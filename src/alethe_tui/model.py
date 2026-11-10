@@ -32,6 +32,12 @@ class Agent:
     error_path: str | None = None
     result_path: str | None = None
     error: str | None = None
+    role: str | None = None
+    role_evidence: str = ""
+    wave: str | None = None
+    effort: str | None = None
+    task_path: str | None = None
+    tokens_partial: bool = False
 
 
 @dataclass

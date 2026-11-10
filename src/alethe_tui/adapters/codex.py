@@ -3,6 +3,8 @@ from pathlib import Path
 
 from ..model import Agent, Event, Execution, ScanResult
 from ._io import NativeFile, bounded_text, discover, mapping, safe_text, stable_id, string
+from ._metadata import ROLE_NAMES, identify_role
+from ._usage import token_number
 
 
 class CodexAdapter:
@@ -27,10 +29,13 @@ class CodexAdapter:
                 parent=string(payload.get("parent_thread_id")) or string(spawn.get("parent_thread_id")),
                 cwd=string(payload.get("cwd")), nickname=safe_text(payload.get("agent_nickname") or spawn.get("agent_nickname")),
                 started=string(payload.get("timestamp")) or timestamp, meta_evidence=evidence,
+                role=string(payload.get('agent_role')) or string(spawn.get('agent_role')),
             )
         elif kind == "turn_context":
             if isinstance(payload.get("model"), str):
                 facts["model"] = safe_text(payload["model"])
+            if isinstance(payload.get('effort'), str):
+                facts['effort'] = safe_text(payload['effort'])
         elif kind == "event_msg":
             etype = string(payload.get("type"))
             lifecycle = {"task_started": ("running", "started"), "task_complete": ("turn_complete", "result_available"),
@@ -42,14 +47,14 @@ class CodexAdapter:
                 file.events.append((offset, event_kind, timestamp, evidence + "/" + etype, string(payload.get("turn_id"))))
             elif etype == "user_message":
                 facts.update(status="unknown", finished=None, activity=timestamp)
-                if not facts.get("task"):
+                if payload.get('message'):
                     facts["task"] = bounded_text(safe_text(payload.get("message")))
             elif etype in ("agent_message", "item_completed"):
                 facts["activity"] = timestamp
             elif etype == "token_count":
                 usage = mapping(mapping(payload.get("info")).get("total_token_usage"))
                 value = usage.get("total_tokens")
-                if isinstance(value, int) and not isinstance(value, bool):
+                if token_number(value) is not None:
                     facts["tokens"] = value
         elif kind == "response_item" and payload.get("type") in ("function_call", "custom_tool_call"):
             if payload.get("channel") not in ("analysis", "reasoning", "thinking"):
@@ -82,10 +87,12 @@ class CodexAdapter:
             execution_id = "codex:execution:" + root_id
             cwd = facts.get("cwd", "")
             agent_id = "codex:" + identity
+            role, role_evidence = identify_role(facts.get('role', ''), facts.get('task', ''), facts.get('nickname', ''))
             agent = Agent(
                 id=agent_id, source="codex", source_id=identity, session_id=identity,
                 execution_id=execution_id, project_id=cwd or execution_id + ":unknown-project",
-                name=facts.get("nickname") or safe_text(identity), parent_id="codex:" + parent if parent else None,
+                name=ROLE_NAMES.get(role) or facts.get("nickname") or safe_text(identity), parent_id="codex:" + parent if parent else None,
+                role=role, role_evidence=f'{file.cursor.path}: {role_evidence}' if role else '', effort=facts.get('effort'),
                 provider="codex", model=facts.get("model"), status=facts.get("status", "unknown"), cwd=cwd,
                 task=facts.get("task", ""),
                 started_at=facts.get("started"), finished_at=facts.get("finished"), last_activity=facts.get("activity"),

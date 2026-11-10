@@ -136,6 +136,34 @@ class JsonCache:
         return previous[1] if previous else {}
 
 
+class TextCache:
+    """Bounded prompt head, cached by file identity; source files stay untouched."""
+    def __init__(self, source):
+        self.source = source
+        self.values = {}
+
+    def read(self, path, diagnostics):
+        previous = self.values.get(path)
+        try:
+            info = path.stat()
+            key = (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            if previous and previous[0] == key:
+                return previous[1]
+            if not stat.S_ISREG(info.st_mode):
+                raise OSError
+            with path.open('rb') as handle:
+                data = handle.read(LIMIT)
+            text = safe_text(data.decode('utf-8', errors='replace'))
+            self.values[path] = (key, text)
+            if info.st_size > LIMIT:
+                diagnostics.append(diagnostic(self.source, path, 'limited', 'tarefa limitada aos primeiros 64KiB'))
+            return text
+        except OSError:
+            if previous:
+                diagnostics.append(diagnostic(self.source, path, 'unavailable', 'tarefa indisponível; última leitura válida preservada'))
+            return previous[1] if previous else ''
+
+
 class JsonlCursor:
     """At most 64KiB per poll, complete records only, bounded pending line.
 
@@ -152,6 +180,7 @@ class JsonlCursor:
         self.pending = b""
         self.discard = False
         self.anchor = b""
+        self.initial_skipped = False
 
     def _parse(self, data, start, diagnostics):
         rows = []
@@ -199,6 +228,7 @@ class JsonlCursor:
                     self.offset = 0
                     self.anchor = b""
                     handle.seek(0)
+                    self.initial_skipped = info.st_size > budget
                     if info.st_size > budget:
                         diagnostics.append(diagnostic(self.source, self.path, "limited", "leitura inicial limitada a metadados e cauda de 64KiB; trecho intermediário omitido"))
                         head = handle.readline(budget)

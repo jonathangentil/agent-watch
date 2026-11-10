@@ -432,3 +432,128 @@ def test_claude_background_launch_acknowledgement_is_not_result_delivery(tmp_pat
     result = adapter("ClaudeAdapter", tmp_path).scan()
     assert [e for e in result.events if e.kind == "delegated"]
     assert not [e for e in result.events if e.kind == "result_delivered"]
+
+
+def test_alethe_runtime_prompt_role_effort_and_wave_are_available(tmp_path):
+    from alethe_tui.details import read_agent_detail
+    run = wave(tmp_path / '03-develop', 'running')
+    put(run / 'plan.json', {'phase': 'develop', 'workers': [
+        {'id': 'writer', 'contract': 'developer', 'effort': 'high', 'model': 'example-model'},
+    ]})
+    prompt = run / 'workers/writer/prompt.txt'
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text('Task 8: Implement the example endpoint.\n\nAcceptance: return the expected value.\n'
+                      '<think>PRIVATE</think>\x1b[31mPublic\x1b[0m')
+    before = prompt.read_bytes()
+    result = adapter('AletheAdapter', [run], verify_pids=False).scan()
+    actor = result.agents[0]
+    assert actor.name == 'Developer'
+    assert actor.role == 'developer'
+    assert actor.effort == 'high'
+    assert actor.wave == '03-develop'
+    assert 'Task 8' in actor.task
+    assert actor.task_path == str(prompt)
+    full = read_agent_detail(actor, 'task')
+    assert 'Acceptance: return the expected value.' in full
+    assert 'PRIVATE' not in full and '\x1b' not in full
+    assert prompt.read_bytes() == before
+
+
+@pytest.mark.parametrize('worker,task,role,name', [
+    ('worker', 'You are a planner.\nPlan the migration.', 'planner', 'Planner'),
+    ('rev-onda3', 'Check the implementation.', 'reviewer', 'Reviewer'),
+    ('worker', 'Ask the developer and reviewer about the planner.', None, 'worker'),
+])
+def test_alethe_role_requires_explicit_assignment(tmp_path, worker, task, role, name):
+    run = tmp_path / 'wave'
+    put(run / 'state.json', {'workers': {worker: {'status': 'succeeded'}}})
+    prompt = run / 'workers' / worker / 'prompt.txt'
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text(task)
+    actor = adapter('AletheAdapter', [run], verify_pids=False).scan().agents[0]
+    assert actor.role == role
+    assert actor.name == name
+    assert actor.effort is None
+
+
+def test_alethe_prompt_summary_refreshes_and_survives_temporary_unavailability(tmp_path):
+    run = wave(tmp_path / 'wave')
+    prompt = run / 'workers/writer/prompt.txt'
+    prompt.parent.mkdir(parents=True)
+    prompt.write_text('Task one')
+    reader = adapter('AletheAdapter', [run], verify_pids=False)
+    assert reader.scan().agents[0].task == 'Task one'
+    text = 'Task two is different\n' + 'Acceptance detail. ' * 40
+    prompt.write_text(text)
+    assert reader.scan().agents[0].task == text
+    prompt.unlink()
+    actor = reader.scan().agents[0]
+    assert actor.task == text
+    from alethe_tui.details import read_agent_detail
+    assert read_agent_detail(actor, 'task') == text
+
+
+def test_codex_exposes_declared_role_effort_and_latest_public_task(tmp_path):
+    append(tmp_path / 'sessions/x.jsonl', codex_meta(agent_role='developer'),
+           {'type': 'turn_context', 'payload': {'model': 'example-model', 'effort': 'high'}},
+           cevent('user_message', message='Task one'), cevent('user_message', message='Task two'))
+    actor = adapter('CodexAdapter', tmp_path).scan().agents[0]
+    assert actor.name == 'Developer'
+    assert actor.role == 'developer'
+    assert actor.effort == 'high'
+    assert actor.task == 'Task two'
+
+
+@pytest.mark.parametrize('usage,expected', [
+    ({'inputTokens':100,'cacheReadTokens':20,'cacheWriteTokens':30,'outputTokens':10},160),
+    ({'input_tokens':100,'cached_input_tokens':20,'output_tokens':10},110),
+    ({'input_tokens':100,'cache_read_input_tokens':20,'cache_creation_input_tokens':30,'output_tokens':10},160),
+    ({'totalTokens':0},0),
+    ({'total_tokens':42},42),
+    ({'inputTokens':100},None),
+    ({'inputTokens':True,'outputTokens':10},None),
+])
+def test_alethe_reported_tokens_support_normalized_usage_without_double_counting_cache(tmp_path, usage, expected):
+    run=wave(tmp_path / 'run')
+    put(run / 'workers/writer/outcome.json',{'metrics':{'usage':usage}})
+    assert adapter('AletheAdapter',[run],verify_pids=False).scan().agents[0].tokens == expected
+
+
+def test_claude_token_usage_counts_each_message_once_and_updates_streamed_totals(tmp_path):
+    path=tmp_path / 'projects/example/main/subagents/agent-alpha.jsonl'
+    first=claude_row(uuid='part-1')
+    first['message'].update(id='message-1',usage={'input_tokens':100,'output_tokens':0,'cache_read_input_tokens':20})
+    second=claude_row(uuid='part-2')
+    second['message'].update(id='message-1',usage={'output_tokens':10})
+    third=claude_row(uuid='part-3')
+    third['message'].update(id='message-2',usage={'input_tokens':40,'output_tokens':5})
+    append(path,first,second,third,third)
+    reader=adapter('ClaudeAdapter',tmp_path)
+    actor=reader.scan().agents[0]
+    assert actor.tokens == 175
+    assert actor.tokens_partial is False
+    assert reader.scan().agents[0].tokens == 175
+
+
+def test_claude_token_usage_from_truncated_initial_history_is_partial(tmp_path):
+    path=tmp_path / 'projects/example/main/subagents/agent-alpha.jsonl'
+    append(path,claude_row())
+    with path.open('a') as handle:
+        handle.write('{}\n'*30000)
+    row=claude_row(uuid='last')
+    row['message'].update(id='last-message',usage={'input_tokens':100,'output_tokens':10})
+    append(path,row)
+    actor=adapter('ClaudeAdapter',tmp_path).scan().agents[0]
+    assert actor.tokens == 110
+    assert actor.tokens_partial is True
+
+
+def test_claude_missing_message_usage_keeps_total_partial(tmp_path):
+    first=claude_row(uuid='known')
+    first['message'].update(id='known',usage={'input_tokens':100,'output_tokens':10})
+    missing=claude_row(uuid='missing')
+    missing['message']['id']='missing'
+    append(tmp_path / 'projects/example/main/subagents/agent-alpha.jsonl',first,missing)
+    actor=adapter('ClaudeAdapter',tmp_path).scan().agents[0]
+    assert actor.tokens == 110
+    assert actor.tokens_partial is True

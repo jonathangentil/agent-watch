@@ -6,7 +6,8 @@ import math
 from pathlib import Path
 import sys
 import threading
-import webbrowser
+
+from .browser import open_browser
 
 from .config import Config, load_config
 from .monitor import Monitor
@@ -14,13 +15,13 @@ from .monitor import Monitor
 
 def build_monitor(config, demo=False):
     from .adapters import AletheAdapter, ClaudeAdapter, CodexAdapter
-    monitor = Monitor([AletheAdapter(config.roots, config.verify_pids), ClaudeAdapter(config.claude_root), CodexAdapter(config.codex_root)], config.interval)
+    monitor = Monitor([AletheAdapter(config.roots, config.verify_pids), ClaudeAdapter(config.claude_root), CodexAdapter(config.codex_root)], config.interval, project_dirs=config.project_dirs)
     monitor.demo = demo
     return monitor
 
 
 def parser():
-    result = argparse.ArgumentParser(description="Acompanhe agentes Alethe, Claude Code e Codex no terminal ou em uma janela local.")
+    result = argparse.ArgumentParser(description="Agent Watch: acompanhe agentes Alethe, Claude Code e Codex no terminal ou em uma janela local.")
     result.add_argument("--web", action="store_true", help="servidor gráfico sem interface de terminal")
     result.add_argument("--office", action="store_true", help="abrir o escritório visual ao iniciar")
     result.add_argument("--no-open", action="store_true", help="não abrir o navegador automaticamente")
@@ -61,12 +62,13 @@ def main(argv=None):
         from .server import LocalServer
         server = LocalServer(monitor, port=args.port).start()
         view = "office" if args.office else "panel"
-        print(("DEMONSTRAÇÃO · dados fictícios\n" if demo else "Monitor local · somente leitura\n") + server.url(view=view), flush=True)
+        print("Agent Watch · " + ("DEMONSTRAÇÃO · dados fictícios\n" if demo else "Monitor local · somente leitura\n") + server.url(view=view), flush=True)
         monitor.start()
         if demo:
             demo.start()
         if not args.no_open and (args.web or args.office):
-            webbrowser.open(server.url(view=view))
+            if not open_browser(server.url(view=view)):
+                print("O navegador não abriu. Use a URL de sessão exibida acima.", file=sys.stderr)
         if args.web:
             while True:
                 threading.Event().wait(.5)

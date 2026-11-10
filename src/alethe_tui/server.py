@@ -75,6 +75,17 @@ class LocalServer:
                         "Set-Cookie": f"alethe_session={owner._token}; HttpOnly; SameSite=Strict; Path=/"})
                     return
                 if not self.authenticated():
+                    if route == "/":
+                        self.send_data(HTTPStatus.UNAUTHORIZED, """<!doctype html>
+<html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Agent Watch · Abrir sessão</title>
+<body><main><h1>Agent Watch</h1><p>Este navegador ainda não está autorizado para a sessão atual.</p>
+<p>Na pasta do projeto, execute <code>./service.sh open</code> para abrir o monitor em segundo plano.</p>
+<p>Se iniciou com <code>./run.sh</code>, abra a URL completa exibida no terminal.</p>
+<p>Use o endereço completo com a chave de sessão. Abrir apenas <code>localhost:3010</code> ou trocar
+<code>127.0.0.1</code> por <code>localhost</code> não transfere a autorização entre endereços.</p>
+</main></body></html>""", "text/html; charset=utf-8")
+                        return
                     self.error(HTTPStatus.UNAUTHORIZED, "Abra o endereço de sessão exibido pelo aplicativo")
                     return
                 if route == "/api/snapshot":

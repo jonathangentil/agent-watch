@@ -5,7 +5,7 @@ import asyncio
 from contextlib import suppress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
-import webbrowser
+from .browser import open_browser
 
 from rich.text import Text
 from textual.app import App, ComposeResult
@@ -27,7 +27,7 @@ def _elapsed(actor):
 
 
 class AgentApp(App):
-    TITLE = "ALÊTHE · agentes trabalhando"
+    TITLE = "Agent Watch · agentes trabalhando"
     CSS = """
     Screen { background: #101419; color: #dce7df; }
     #overview { height: 2; padding: 0 1; color: #b8e88c; }
@@ -135,7 +135,7 @@ class AgentApp(App):
         for actor in actors:
             style = "green" if actor["status"] == "running" else "yellow" if actor["status"] == "queued" else "red" if actor["status"] in {"failed", "interrupted", "timed_out"} else ""
             idle = actor.get("idle_seconds")
-            table.add_row(Text(actor["name"]), Text(f"{actor['source']} / {actor.get('model') or 'não informado'}"),
+            table.add_row(Text(actor["name"]), Text(f"{actor['source']} / {actor.get('model') or 'não informado'} · {actor.get('effort') or 'effort não informado'}"),
                           Text(LABELS.get(actor["status"], actor["status"]), style=style), _elapsed(actor),
                           f"{int(idle)}s" if isinstance(idle, (int, float)) else "—", key=actor["id"])
         if actors:
@@ -160,7 +160,7 @@ class AgentApp(App):
         actor = next((a for a in self._data.get("agents", []) if a["id"] == self.selected_agent_id), None)
         if actor:
             self._remembered[self._execution_id] = actor["id"]
-            metadata = f"{actor['name']} · {self._detail_kind} · {actor.get('evidence') or 'estado não confirmado'}\n{actor.get('task') or 'Tarefa não informada'}"
+            metadata = f"{actor['name']} · {actor.get('source_id') or actor['id']} · onda {actor.get('wave') or 'não informada'} · {self._detail_kind}\n{actor.get('task') or 'Tarefa não informada'}"
         else:
             metadata = "Nenhum agente neste filtro. Aguardando fontes ou uma nova execução."
         self.query_one("#agent-meta", Static).update(Text(metadata))
@@ -252,7 +252,7 @@ class AgentApp(App):
 
     async def _open(self, view):
         if self.server:
-            opened = await asyncio.to_thread(webbrowser.open, self.server.url(view=view))
+            opened = await asyncio.to_thread(open_browser, self.server.url(view=view))
             if not opened:
                 self.notify("O navegador não abriu. O endereço está na saída inicial do comando.")
         else:

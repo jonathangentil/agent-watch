@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import os
+import json
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
 
@@ -15,12 +16,28 @@ class Config:
     codex_root: Path
     interval: float = 1.0
     verify_pids: bool = True
+    project_dirs: list[Path] = field(default_factory=list)
 
 
 def load_config(path: Path | None = None, environ: Mapping[str, str] | None = None,
                 roots: list[Path] | None = None, claude_root: Path | None = None,
                 codex_root: Path | None = None) -> Config:
-    env = os.environ if environ is None else environ
+    env = dict(os.environ if environ is None else environ)
+    key = 'AGENT_WATCH_PROJECT_DIRS'
+    if key not in env:
+        try:
+            lines = (Path.cwd() / '.env').read_text(encoding='utf-8').splitlines()
+        except FileNotFoundError:
+            lines = []
+        except OSError as error:
+            raise ValueError(f'Não foi possível ler .env: {error}') from error
+        for line in lines:
+            name, separator, value = line.strip().removeprefix('export ').partition('=')
+            if separator and name.strip() == key:
+                value = value.strip()
+                if len(value) >= 2 and value[0] in {'"', "'"} and value[-1] == value[0]:
+                    value = value[1:-1]
+                env[key] = value
     home = Path(env.get("HOME", str(Path.home())))
     base = Path(env.get("XDG_CONFIG_HOME", str(home / ".config")))
     path = path or base / "alethe-tui/config.toml"
@@ -37,6 +54,14 @@ def load_config(path: Path | None = None, environ: Mapping[str, str] | None = No
         if raw == "~" or raw.startswith("~/"):
             raw = str(home) + raw[1:]
         return Path(raw).resolve()
+
+    try:
+        directories = json.loads(env.get(key, '[]'))
+    except (ValueError, TypeError) as error:
+        raise ValueError(f'{key} deve ser uma lista JSON de diretórios') from error
+    if not isinstance(directories, list) or not all(isinstance(p, str) and p.strip() for p in directories):
+        raise ValueError(f'{key} deve ser uma lista JSON de diretórios')
+    project_dirs = list(dict.fromkeys(expand(p) for p in directories))
 
     configured = settings.get("roots", [])
     if not isinstance(configured, list) or not all(isinstance(x, str) for x in configured):
@@ -57,5 +82,5 @@ def load_config(path: Path | None = None, environ: Mapping[str, str] | None = No
         list(dict.fromkeys(expand(p) for p in candidates)),
         expand(claude_root or settings.get("claude_root") or Path(env.get("CLAUDE_CONFIG_DIR", str(home / ".claude"))) / "projects"),
         expand(codex_root or settings.get("codex_root") or Path(env.get("CODEX_HOME", str(home / ".codex"))) / "sessions"),
-        float(interval), verify,
+        float(interval), verify, project_dirs,
     )

@@ -13,6 +13,22 @@ export function elapsed(start, end = new Date().toISOString()) {
   if (!Number.isFinite(seconds) || seconds < 0) return 'não informado';
   return `${Math.floor(seconds/60)}m ${String(seconds%60).padStart(2,'0')}s`;
 }
+export function runPages(heights, availableHeight) {
+  const pages=[];let start=0,used=0;
+  heights.forEach((height,index)=>{
+    if(index>start&&used+height>availableHeight){pages.push({start,end:index});start=index;used=0;}
+    used+=height;
+  });
+  pages.push({start,end:heights.length});return pages;
+}
+export function executionTokens(snapshot, executionId) {
+  const actors=[...new Map(snapshot.agents.filter(a=>a.execution_id===executionId).map(a=>[a.id,a])).values()];
+  const known=actors.filter(a=>Number.isSafeInteger(a.tokens)&&a.tokens>=0);
+  const leader=snapshot.executions.find(e=>e.id===executionId)?.leader_id;
+  const leaderReported=Boolean(leader&&known.some(a=>a.id===leader));
+  return {total:known.length?known.reduce((sum,a)=>sum+a.tokens,0):null,reported:known.length,agents:actors.length,
+    partial:known.length<actors.length||known.some(a=>a.tokens_partial)||!leaderReported,leaderReported};
+}
 export class MonitorState {
   constructor(saved = {}) {
     this.snapshot = {agents:[],executions:[],projects:[],events:[],diagnostics:[],totals:{}};
@@ -21,31 +37,26 @@ export class MonitorState {
     this.selections = new Map(Object.entries(saved.selections || {}));
     this.view = saved.view === 'office' ? 'office' : 'panel';
     this.filters = {source:'all',active:false,search:'',...saved.filters};
-    this.page = 0; this.connected = false; this.seen = new Set(); this.initialized = false;
+    this.connected = false; this.seen = new Set(); this.initialized = false;
   }
   context() { return {projectId:this.projectId,executionId:this.executionId,selections:Object.fromEntries(this.selections),view:this.view,filters:this.filters}; }
-  executions() { return this.snapshot.executions.filter(e=>!this.projectId || e.project_id===this.projectId || e.project_ids?.includes(this.projectId)); }
+  executions() { return this.snapshot.executions.filter(e=>(!this.projectId || e.project_id===this.projectId || e.project_ids?.includes(this.projectId))&&(this.filters.source==='all'||e.source===this.filters.source||this.snapshot.agents.some(a=>a.execution_id===e.id&&a.source===this.filters.source))); }
   get execution() { return this.executions().find(e=>e.id===this.executionId); }
   get agentId() { return this.selections.get(this.executionId) || ''; }
   get agent() { return this.snapshot.agents.find(a=>a.id===this.agentId && a.execution_id===this.executionId); }
   workers() { return this.snapshot.agents.filter(a=>a.execution_id===this.executionId && a.id!==this.execution?.leader_id); }
-  visibleAgents() { const q=this.filters.search.toLocaleLowerCase(); return this.workers().filter(a=>(this.filters.source==='all'||a.source===this.filters.source)&&(!this.filters.active||active.has(a.status))&&[a.name,a.id,a.task,a.model,a.provider].join(' ').toLocaleLowerCase().includes(q)); }
-  pageAgents() { return this.visibleAgents().slice(this.page*6,this.page*6+6); }
-  get pages() { return Math.max(1,Math.ceil(this.visibleAgents().length/6)); }
-  setPage(page) { this.page=Math.max(0,Math.min(this.pages-1,page)); }
-  setFilters(filters) { Object.assign(this.filters,filters); this.page=0; }
+  visibleAgents() { const q=this.filters.search.toLocaleLowerCase(); return this.workers().filter(a=>(this.filters.source==='all'||a.source===this.filters.source)&&(!this.filters.active||active.has(a.status))&&[a.name,a.id,a.source_id,a.task,a.wave,a.model,a.provider,a.effort].join(' ').toLocaleLowerCase().includes(q)); }
+  setFilters(filters) { Object.assign(this.filters,filters); this.reconcile(); }
   setView(view) { this.view=view==='office'?'office':'panel'; }
-  selectProject(id) { this.projectId=id; this.reconcile(); this.page=0; }
-  selectExecution(id) { if(this.executions().some(e=>e.id===id)) {this.executionId=id;this.reconcile();this.revealSelection();} }
-  selectAgent(id) { if(this.snapshot.agents.some(a=>a.id===id&&a.execution_id===this.executionId)) {this.selections.set(this.executionId,id);this.revealSelection();} }
-  revealSelection() { const index=this.visibleAgents().findIndex(a=>a.id===this.agentId);if(index>=0)this.page=Math.floor(index/6);else this.setPage(this.page); }
+  selectProject(id) { this.projectId=id; this.reconcile(); }
+  selectExecution(id) { if(this.executions().some(e=>e.id===id)) {this.executionId=id;this.reconcile();} }
+  selectAgent(id) { if(this.snapshot.agents.some(a=>a.id===id&&a.execution_id===this.executionId)) this.selections.set(this.executionId,id); }
   reconcile() {
     if(this.projectId&&!this.snapshot.projects.some(p=>p.id===this.projectId))this.projectId='';
     const candidates=this.executions();
     if(!candidates.some(e=>e.id===this.executionId))this.executionId=[...candidates].sort((a,b)=>Number(active.has(b.status))-Number(active.has(a.status))||(Date.parse(b.started_at)||0)-(Date.parse(a.started_at)||0))[0]?.id||'';
     const agents=this.snapshot.agents.filter(a=>a.execution_id===this.executionId);
     if(!agents.some(a=>a.id===this.agentId))this.selections.set(this.executionId,this.workers()[0]?.id||agents[0]?.id||'');
-    this.setPage(this.page);
   }
   apply(snapshot) {
     if(snapshot?.version!==1 || !['agents','executions','projects','events','diagnostics'].every(k=>Array.isArray(snapshot[k])) || !snapshot.totals)throw new Error('Snapshot incompatível');

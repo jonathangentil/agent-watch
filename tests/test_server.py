@@ -62,6 +62,18 @@ def test_authentication_and_local_assets(server):
     assert request(server, "/assets/app.js", cookie)[0] == 200
 
 
+def test_missing_or_expired_browser_session_has_recovery_instructions(server):
+    for headers in ({}, {"Cookie": "alethe_session=expired"}, {"Host": f"localhost:{server.port}"}):
+        status, response_headers, body = request(server, "/", headers)
+        assert status == 401
+        assert response_headers["Content-Type"].startswith("text/html")
+        assert b"./service.sh open" in body
+        assert "Set-Cookie" not in response_headers
+        assert server._token.encode() not in body
+    assert request(server, "/api/snapshot")[0] == 401
+    assert request(server, "/assets/app.js")[0] == 401
+
+
 def test_paths_and_details_are_restricted(server):
     cookie = login(server)
     assert request(server, "/assets/../index.html", cookie)[0] == 404

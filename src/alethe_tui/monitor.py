@@ -1,7 +1,7 @@
 """Visão comum às interfaces; não controla os processos monitorados."""
 from __future__ import annotations
 
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from copy import deepcopy
 from dataclasses import asdict, replace
 from datetime import datetime, timezone
@@ -11,6 +11,7 @@ import subprocess
 import threading
 
 from .model import ScanResult
+from .adapters._metadata import task_summary
 
 
 def _iso_now():
@@ -28,6 +29,16 @@ def _timestamp(value):
 @lru_cache(maxsize=1024)
 def resolve_project(cwd: str) -> str:
     path = Path(cwd).expanduser().resolve()
+    if not path.exists():
+        # Alethe creates isolated workers under this exact repository-relative
+        # layout. After cleanup, git -C cannot resolve their common directory.
+        # Keep the recorded owner (also for nested workers), without guessing
+        # that an old repository has moved to another path with the same name.
+        parts = path.parts
+        for index in range(len(parts) - 2):
+            if parts[index:index + 2] == (".alethe", "worktrees") and parts[index + 2].startswith("skill-"):
+                path = Path(*parts[:index])
+                break
     try:
         result = subprocess.run(["git", "-C", str(path), "rev-parse", "--path-format=absolute", "--git-common-dir", "--show-toplevel"],
                                 capture_output=True, text=True, timeout=1, check=False)
@@ -40,10 +51,11 @@ def resolve_project(cwd: str) -> str:
 
 
 class Monitor:
-    def __init__(self, adapters: list, interval: float = 1.0):
+    def __init__(self, adapters: list, interval: float = 1.0, project_dirs: list[Path] | None = None):
         if interval < 0.1:
             raise ValueError("interval deve ser >= 0.1")
         self.adapters = adapters
+        self.project_dirs = tuple(Path(p).expanduser().resolve() for p in project_dirs or [])
         self.demo = False
         self.interval = interval
         self._lock = threading.RLock()
@@ -81,6 +93,7 @@ class Monitor:
             agents = {a.id: replace(a) for b in batches for a in b.agents}
             executions = {e.id: replace(e, project_ids=list(e.project_ids)) for b in batches for e in b.executions}
             worker_sessions = {a.session_id: a for a in agents.values() if a.source == "alethe" and a.session_id}
+            worker_session_counts = Counter(a.session_id for a in agents.values() if a.source == 'alethe' and a.session_id)
             execution_alias, actor_alias = {}, {}
             for execution in list(executions.values()):
                 worker = worker_sessions.get(execution.session_id)
@@ -92,6 +105,9 @@ class Monitor:
             for actor in list(agents.values()):
                 worker = worker_sessions.get(actor.session_id)
                 if actor.source != "alethe" and worker and actor.id != worker.id:
+                    if worker.tokens is None and actor.tokens is not None and worker_session_counts[actor.session_id] == 1:
+                        worker.tokens = actor.tokens
+                        worker.tokens_partial = actor.tokens_partial
                     actor_alias[actor.id] = worker.id
                     agents.pop(actor.id, None)
 
@@ -115,6 +131,18 @@ class Monitor:
                     execution.project_path = execution.project_id
                     execution.project_name = Path(execution.project_path).name or execution.project_name
                 execution.project_ids = list(dict.fromkeys([execution.project_id] + [a.project_id for a in agents.values() if a.execution_id == execution.id]))
+            if self.project_dirs:
+                def included(project):
+                    return Path(project).is_absolute() and any(Path(project).is_relative_to(root) for root in self.project_dirs)
+                agents = {key: a for key, a in agents.items() if included(a.project_id)}
+                for execution in list(executions.values()):
+                    execution.project_ids = [p for p in execution.project_ids if included(p)]
+                    if not execution.project_ids:
+                        executions.pop(execution.id)
+                    elif execution.project_id not in execution.project_ids:
+                        execution.project_id = execution.project_ids[0]
+                        execution.project_path = execution.project_id
+                        execution.project_name = Path(execution.project_id).name
             active = {a.execution_id for a in agents.values() if a.status in {"running", "queued"}}
             ordered = sorted(executions.values(), key=lambda e: e.started_at or "", reverse=True)
             retained = [e for e in ordered if e.id in active] + [e for e in ordered if e.id not in active][:50]
@@ -148,8 +176,11 @@ class Monitor:
             data = self._empty()
             data["demo"] = self.demo
             statuses = [a.status for a in agents.values()]
-            data.update(agents=[asdict(a) for a in agents.values()], executions=[asdict(e) for e in executions.values()],
-                        events=list(self._events.values()), projects=sorted(projects.values(), key=lambda p: p["name"].casefold()),
+            data.update(agents=[{**asdict(a), 'task': task_summary(a.task)} for a in agents.values()], executions=[asdict(e) for e in executions.values()],
+                        events=[item for item in self._events.values() if item['execution_id'] in executions and
+                                all(actor is None or actor in agents or actor == executions[item['execution_id']].leader_id
+                                    for actor in (item['actor_id'], item['target_id']))],
+                        projects=sorted(projects.values(), key=lambda p: p["name"].casefold()),
                         diagnostics=diagnostics, generated_at=_iso_now())
             data["totals"] = {"projects": len(projects), "executions": len(executions), "active_executions": len(active), "agents": len(agents),
                               "running": statuses.count("running"), "queued": statuses.count("queued"),

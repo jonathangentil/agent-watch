@@ -3,7 +3,9 @@ import os
 from pathlib import Path
 
 from ..model import Agent, Event, Execution, ScanResult
-from ._io import JsonCache, diagnostic, discover, mapping, safe_text, sequence, stable_id, string
+from ._io import JsonCache, TextCache, diagnostic, discover, mapping, safe_text, sequence, stable_id, string
+from ._metadata import ROLE_NAMES, identify_role
+from ._usage import reported_tokens
 
 STATUSES = {"queued", "running", "succeeded", "turn_complete", "failed", "timed_out",
             "interrupted", "stopped", "skipped", "unknown"}
@@ -29,6 +31,7 @@ class AletheAdapter:
         self.roots = list(dict.fromkeys(Path(root).expanduser().resolve() for root in roots))
         self.verify_pids = verify_pids
         self.cache = JsonCache("alethe")
+        self.prompts = TextCache('alethe')
         self.known = set()
 
     def _runner(self, state, path, diagnostics):
@@ -106,22 +109,33 @@ class AletheAdapter:
                 outcome = self.cache.read(outcome_path, result.diagnostics, optional=True)
                 values = {**entry, **outcome}
                 intent = intentions.get(worker_id, {})
+                prompt_path = worker_dir / 'prompt.txt'
+                task = self.prompts.read(prompt_path, result.diagnostics) or safe_text(intent.get('task'))
+                declared_role = string(intent.get('contract')) or string(mapping(values.get('contract')).get('role')) or string(intent.get('role'))
+                role, role_evidence = identify_role(declared_role, task, worker_id)
+                if role_evidence == 'função declarada nos metadados':
+                    role_path = folder / 'plan.json' if string(intent.get('contract')) or string(intent.get('role')) else outcome_path
+                elif role_evidence == 'atribuição explícita na tarefa':
+                    role_path = prompt_path if prompt_path in self.prompts.values else folder / 'plan.json'
+                else:
+                    role_path = state_path
                 worker_status = status(values.get("status"))
                 if runner == "runner ausente" and worker_status in ("queued", "running"):
                     worker_status = "interrupted"
                 cwd = string(values.get("cwd")) or string(intent.get("cwd"))
                 metrics = mapping(values.get("metrics"))
                 usage = mapping(metrics.get("usage"))
-                token_count = number(usage.get("total_tokens"))
-                if token_count is None and number(usage.get("input_tokens")) is not None and number(usage.get("output_tokens")) is not None:
-                    token_count = usage["input_tokens"] + usage["output_tokens"]
+                token_count = reported_tokens(usage)
                 evidence_path = outcome_path if outcome else state_path
                 agent = Agent(
                     id="alethe:" + stable_id(str(folder), worker_id), source="alethe", source_id=worker_id,
                     execution_id=execution_id, project_id=cwd or execution_id + ":unknown-project",
-                    name=safe_text(worker_id), status=worker_status, parent_id=lead_id,
+                    name=ROLE_NAMES.get(role, safe_text(worker_id)), status=worker_status, parent_id=lead_id,
                     provider=safe_text(values.get("provider") or intent.get("provider")) or None,
-                    model=safe_text(intent.get("model")) or None, task=safe_text(intent.get("task")), cwd=cwd,
+                    model=safe_text(intent.get("model")) or None, task=task, cwd=cwd,
+                    role=role, role_evidence=f'{role_path}: {role_evidence}' if role else '',
+                    wave=safe_text(folder.name), effort=safe_text(intent.get('effort')) or None,
+                    task_path=str(prompt_path) if prompt_path in self.prompts.values else None,
                     started_at=string(values.get("startedAt")) or None,
                     finished_at=string(values.get("finishedAt")) or None,
                     last_activity=string(values.get("lastOutputAt")) or None,
@@ -138,8 +152,8 @@ class AletheAdapter:
                         id="alethe:" + stable_id(str(folder), worker_id, kind, timestamp), kind=kind, source="alethe",
                         execution_id=execution_id, timestamp=timestamp, actor_id=actor or agent.id, target_id=target,
                         evidence=f"{path}: {kind} ({worker_id})"))
-                if lead_id and intent.get("task"):
-                    event("delegated", string(state.get("startedAt")) or None, folder / "plan.json", lead_id, agent.id)
+                if lead_id and task:
+                    event("delegated", string(state.get("startedAt")) or None, prompt_path if agent.task_path else folder / "plan.json", lead_id, agent.id)
                 if agent.started_at:
                     event("started", agent.started_at, state_path)
                 if worker_status in ("succeeded", "turn_complete") and (agent.finished_at or agent.result_path):

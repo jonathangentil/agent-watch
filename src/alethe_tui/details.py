@@ -10,6 +10,14 @@ from .model import Agent
 
 def read_agent_detail(agent: Agent, kind: str = "output") -> str:
     if kind == "task":
+        if agent.task_path:
+            try:
+                path = Path(agent.task_path)
+                if stat.S_ISREG(path.stat().st_mode):
+                    with path.open('rb') as handle:
+                        return bounded_text(safe_text(handle.read(LIMIT).decode('utf-8', errors='replace')))
+            except OSError:
+                pass
         return bounded_text(safe_text(agent.task))
     if kind not in ("output", "result", "error"):
         return ""
