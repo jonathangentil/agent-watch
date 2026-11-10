@@ -1,41 +1,78 @@
 # Alethe TUI
 
-Monitor local de agentes com TUI e uma janela opcional com bonequinhos trabalhando.
+Monitor local, somente leitura, para orquestrações Alethe e subagentes nativos do Claude Code e Codex.
 
-## Estado do projeto
+## Abrir
 
-Desenho e prévias interativas preparados. A aplicação funcional ainda não foi implementada; aguarda aprovação do desenho.
+Na pasta `agent-watch`:
 
-Decisões confirmadas pelo usuário em 2026-11-09:
+```sh
+./run.sh                       # TUI no terminal
+./run.sh --web --office         # janela gráfica, iniciando no escritório
+./run.sh --web                  # janela gráfica, iniciando no painel
+./run.sh --web --office --demo  # demonstração explicitamente fictícia
+```
 
-- TUI que permanece aberta e detecta novas execuções.
-- Aplicação independente acompanhando a Alethe.
-- Prévia visual no navegador.
-- Janela compacta com bonequinhos trabalhando e interagindo por charme.
-- Detectar também subagentes nativos do Claude Code e do Codex.
-- Manter o painel detalhado e o escritório visual, com alternância preservando a seleção.
-- Acompanhar várias orquestrações em vários projetos ao mesmo tempo, com resumo geral e filtros.
-- Projeto separado em `agent-watch`.
+A janela gráfica oferece **Painel / Escritório**, preservando projeto, execução e agente selecionados. O botão **Janela compacta** abre uma janela menor. Na TUI, `o` abre o escritório e `p` abre o painel.
 
-## Desenho e prévias
+Mantenha o comando aberto para acompanhar novas execuções. `Ctrl+C` encerra o servidor gráfico; `q` encerra a TUI. Isso não interrompe os agentes monitorados. A primeira URL exibida pelo comando autoriza somente essa sessão local; não a publique.
 
-- [Desenho proposto](docs/superpowers/specs/2026-11-09-alethe-tui-design.md).
-- [Prévia da TUI](docs/superpowers/previews/alethe-tui.html).
-- [Prévia do escritório](docs/superpowers/previews/alethe-office.html).
-- [Prévia unificada: projetos, execuções e duas interfaces](docs/superpowers/previews/alethe-preview.html).
+## Instalação em outra máquina
 
-As prévias usam dados fictícios. É possível abrir os HTMLs diretamente no navegador; o servidor de brainstorming acrescenta atualização automática. A cena e os filtros não controlam agentes reais.
+Python 3.11 ou superior e `uv`:
 
-## Direção técnica proposta
+```sh
+uv sync --extra dev
+uv run alethe-tui --web --office
+```
 
-Python + Textual para o terminal; painel detalhado e escritório SVG/CSS/JavaScript na janela; um monitor compartilhado que lê os artefatos locais da Alethe, Claude Code e Codex. A leitura inicial independe de hooks, modificações nos executores ou novas chamadas a modelos.
+O ambiente desta pasta já está em `.venv/`. Dependências resolvidas em `uv.lock`; nenhuma chave de API é necessária para monitorar os arquivos locais.
 
-Não há comando instalável ainda. O nome proposto para a aplicação é `alethe-tui`.
+## Fontes e vários projetos
 
-## Próximo passo
+- Alethe: `~/.config/alethe/orchestrations`, respeitando `XDG_CONFIG_HOME`, `ALETHE_ORCHESTRATE_POLICY` e `ALETHE_ORCHESTRATE_HOME`.
+- Claude Code: `~/.claude/projects`, respeitando `CLAUDE_CONFIG_DIR`.
+- Codex: `~/.codex/sessions`, respeitando `CODEX_HOME`.
 
-V2 solicitada: **Kanban como terceira interface**. Planejamento em [docs/ROADMAP.md](docs/ROADMAP.md); a V1 mantém Painel e Escritório.
+A coleta acompanha todas as raízes configuradas. Os filtros de projeto e execução mudam a visualização, sem parar a coleta das outras execuções. Worktrees são agrupadas pela raiz comum do Git. Nomes iguais em projetos diferentes conservam suas identidades.
 
-Revisar/aprovar o desenho e a prévia atualizados. Depois, preparar o plano e implementar os adaptadores, a TUI e a cena com testes de detecção, estado e hierarquia.
+```sh
+./run.sh --root /outra/raiz/alethe --root /mais/uma/raiz
+./run.sh --claude-root /pasta/projects --codex-root /pasta/sessions
+./run.sh --web --no-open --port 8765
+```
 
-Os arquivos de sessão da prévia em `.superpowers/` ficam fora do Git; não publicar chaves do servidor, transcrições ou configurações de autenticação.
+Configuração opcional em `~/.config/alethe-tui/config.toml`:
+
+```toml
+roots = ["/outra/raiz/alethe"]
+interval = 1.0
+verify_pids = true
+```
+
+Use `--no-pid-check` para arquivos copiados de outra máquina: PIDs locais não verificam processos remotos. Uma raiz personalizada desconhecida precisa ser cadastrada; a aplicação não varre todo o disco.
+
+## Estados e animações
+
+Delegação, conclusão e entrega de resultado são situações distintas. A cena anima os eventos identificáveis disponíveis na fonte. Eventos históricos não são reapresentados como novos a cada atualização.
+
+O modo **Charme decorativo** é opcional; caminhadas e acenos desse modo não comprovam mensagens entre modelos. Pausar animações não pausa agentes. O escritório mostra até seis workers por página e mantém o líder separado das contagens.
+
+Os formatos locais variam por versão. Onde não há evidência suficiente, aparece **estado não confirmado**. No Claude, uma resposta concluída pode ser retomada; não representa encerramento permanente do agente. Silêncio não prova travamento. Resultados do Codex e da Alethe não são rotulados como recebidos pelo lead sem um evento que comprove isso.
+
+Não há alteração de hooks, configurações de CLI, históricos, SQLite ou agentes. Raciocínio interno não é exibido. O servidor fica em `127.0.0.1`, com cookie de sessão, e não envia os dados a serviços externos.
+
+## Validação
+
+```sh
+.venv/bin/python -m pytest
+node --test tests/web/*.test.mjs
+```
+
+O smoke `tests/web/real-server-smoke.mjs` usa Playwright e Chromium já instalados, apontados por `PLAYWRIGHT_MODULE` e `CHROMIUM_EXECUTABLE`. Ele inicia um servidor real com fontes sintéticas; não chama modelos nem altera históricos reais.
+
+Estado da entrega e evidências: [docs/STATUS.md](docs/STATUS.md). Desenho e plano em `docs/superpowers/`. As prévias HTML dessa pasta usam dados fictícios e ficam preservadas como referência visual.
+
+## V2
+
+**Kanban como terceira interface**, solicitado pelo usuário. Fora desta V1; registrado em [docs/ROADMAP.md](docs/ROADMAP.md).

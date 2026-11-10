@@ -96,7 +96,7 @@ class CodexAdapter:
             execution = executions.setdefault(execution_id, Execution(
                 id=execution_id, title="Codex " + safe_text(root_id), source="codex", project_id=agent.project_id,
                 project_name=safe_text(Path(cwd).name) if cwd else "não informado", project_path=cwd,
-                session_id=root_id, leader_id="codex:" + root_id if root_id != identity else None))
+                session_id=root_id, leader_id="codex:" + root_id if root_id != identity else None, started_at=facts.get('started')))
             if agent.project_id not in execution.project_ids:
                 execution.project_ids.append(agent.project_id)
             if parent:

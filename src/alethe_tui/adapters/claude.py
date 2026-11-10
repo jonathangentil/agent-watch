@@ -17,6 +17,8 @@ class ClaudeAdapter:
         timestamp = string(row.get("timestamp")) or None
         if row.get("isSidechain") is True and isinstance(row.get("agentId"), str):
             facts.update(identity=row["agentId"], sidechain=True)
+            if timestamp:
+                facts.setdefault('started', timestamp)
         if isinstance(row.get("sessionId"), str):
             facts["session"] = row["sessionId"]
         if isinstance(row.get("cwd"), str):
@@ -37,7 +39,8 @@ class ClaudeAdapter:
             if message.get("channel") in ("analysis", "reasoning", "thinking"):
                 return
             if kind == "user" and not row.get("isMeta") and not facts.get("task"):
-                blocks = [block for block in sequence(message.get("content")) if mapping(block).get("type") == "text"]
+                content = message.get("content")
+                blocks = content if isinstance(content, str) else [block for block in sequence(content) if mapping(block).get("type") == "text"]
                 facts["task"] = bounded_text(safe_text("\n".join(public_blocks(blocks))))
             for index, block in enumerate(sequence(message.get("content"))):
                 block = mapping(block)
@@ -108,7 +111,7 @@ class ClaudeAdapter:
             execution = executions.setdefault(execution_id, Execution(
                 id=execution_id, title="Claude " + safe_text(session), source="claude", project_id=agent.project_id,
                 project_name=safe_text(Path(cwd).name) if cwd else "não informado", project_path=cwd,
-                session_id=session, leader_id="claude:" + session))
+                session_id=session, leader_id="claude:" + session, started_at=facts.get('started')))
             if agent.project_id not in execution.project_ids:
                 execution.project_ids.append(agent.project_id)
             def add_event(kind, event, actor, target=None):

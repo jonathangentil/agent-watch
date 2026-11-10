@@ -2,7 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-from functools import partial
+from contextlib import suppress
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 import webbrowser
 
@@ -62,6 +63,10 @@ class AgentApp(App):
         self._tree_signature = None
         self._rendering = False
         self._data = {}
+        self._detail_task = None
+        self._pending_detail = None
+        self._closing = False
+        self._detail_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="alethe-detail")
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
@@ -150,6 +155,8 @@ class AgentApp(App):
         self._show_selected()
 
     def _show_selected(self):
+        if self._closing:
+            return
         actor = next((a for a in self._data.get("agents", []) if a["id"] == self.selected_agent_id), None)
         if actor:
             self._remembered[self._execution_id] = actor["id"]
@@ -158,16 +165,28 @@ class AgentApp(App):
             metadata = "Nenhum agente neste filtro. Aguardando fontes ou uma nova execução."
         self.query_one("#agent-meta", Static).update(Text(metadata))
         if actor:
-            # Create the coroutine only when its worker actually runs. A rapid
-            # selection change may cancel a queued worker before it starts.
-            self.run_worker(partial(self._load_detail, actor["id"], self._detail_kind), group="detail", exclusive=True)
+            key = actor["id"], self._detail_kind
+            if self._detail_task and not self._detail_task.done():
+                if self._pending_detail == key:
+                    return
+                self._detail_task.cancel()
+            self._pending_detail = key
+            self._detail_task = asyncio.create_task(self._load_detail(*key))
         else:
             self.query_one("#detail", RichLog).clear()
             self._detail_text = ""
 
+    async def on_unmount(self):
+        self._closing = True
+        if self._detail_task:
+            self._detail_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._detail_task
+        self._detail_executor.shutdown(wait=True, cancel_futures=True)
+
     async def _load_detail(self, actor_id, kind):
         try:
-            text = await asyncio.to_thread(self.monitor.detail, actor_id, kind)
+            text = await asyncio.get_running_loop().run_in_executor(self._detail_executor, self.monitor.detail, actor_id, kind)
         except (KeyError, OSError, ValueError, ImportError) as error:
             text = f"Detalhe indisponível: {error}"
         if actor_id != self.selected_agent_id or kind != self._detail_kind or not self.is_mounted:
@@ -181,6 +200,9 @@ class AgentApp(App):
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted):
         if self._rendering or event.row_key.value is None:
+            return
+        table = self.query_one("#agents", DataTable)
+        if event.row_key not in table.rows or event.cursor_row != table.cursor_row:
             return
         actor_id = str(event.row_key.value)
         if actor_id != self.selected_agent_id:

@@ -132,6 +132,10 @@ class Monitor:
                     instant = _timestamp(event.timestamp)
                     item["is_live"] = not self._initial and instant is not None and instant >= self._started
                     self._events[event.id] = item
+            for item in self._events.values():
+                item['execution_id'] = canonical(item['execution_id'], execution_alias)
+                item['actor_id'] = canonical(item['actor_id'], actor_alias)
+                item['target_id'] = canonical(item['target_id'], actor_alias)
             self._initial = False
             while len(self._events) > 500:
                 self._events.popitem(last=False)

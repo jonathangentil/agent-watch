@@ -66,6 +66,21 @@ def test_missing_metric_is_not_zero(tmp_path):
     assert data["agents"][0]["cost_usd"] is None
 
 
+def test_late_session_correlation_updates_existing_events(tmp_path):
+    a = batch(tmp_path, 'alpha')
+    child = batch(tmp_path, 'beta', 'codex', session='shared')
+    child.events = [Event('stable-event','delegated','codex','beta',actor_id='lead:beta',target_id='agent:beta')]
+    feed = Feed(a)
+    monitor = Monitor([feed,Feed(child)])
+    monitor.refresh()
+    a.agents[0].session_id = 'shared'
+    feed.result = a
+    result = monitor.refresh()
+    assert result['events'][0]['execution_id'] == 'alpha'
+    assert result['events'][0]['actor_id'] == 'agent:alpha'
+    assert result['events'][0]['id'] == 'stable-event'
+
+
 def test_initial_and_late_historical_events_do_not_become_live(tmp_path):
     source = batch(tmp_path)
     source.events = [Event("old-1", "delegated", "alethe", "alpha", "2020-01-01T00:00:00Z", "lead:alpha", "agent:alpha")]

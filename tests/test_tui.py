@@ -30,6 +30,7 @@ async def test_refresh_keeps_selected_agent_and_search(tmp_path):
         await pilot.press("down")
         await pilot.pause()
         assert app.selected_agent_id == "b"
+
         feed.result.agents[0].status = "succeeded"
         monitor.refresh()
         app.sync_snapshot()
