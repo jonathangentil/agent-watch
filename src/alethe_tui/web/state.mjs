@@ -1,0 +1,69 @@
+// Shared UI state: identities, never names, determine selection and event delivery.
+const active = new Set(['running', 'queued']);
+const labels = {queued:'aguardando',running:'executando',succeeded:'concluído',turn_complete:'turno concluído',failed:'falhou',timed_out:'tempo esgotado',interrupted:'interrompido',stopped:'parado',skipped:'ignorado',unknown:'estado não confirmado'};
+export const stateLabel = status => labels[status] || `estado não confirmado (${safeText(status || 'unknown')})`;
+export function safeText(value) {
+  return String(value ?? '').replace(/<(think|thinking|analysis|reasoning)\b[^>]*>[\s\S]*?(?:<\/\1\s*>|$)/gi, '[conteúdo interno oculto]')
+    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g,'').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g,'')
+    .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/g,'');
+}
+export function elapsed(start, end = new Date().toISOString()) {
+  if (!start || !end) return 'não informado';
+  const seconds = Math.floor((Date.parse(end) - Date.parse(start))/1000);
+  if (!Number.isFinite(seconds) || seconds < 0) return 'não informado';
+  return `${Math.floor(seconds/60)}m ${String(seconds%60).padStart(2,'0')}s`;
+}
+export class MonitorState {
+  constructor(saved = {}) {
+    this.snapshot = {agents:[],executions:[],projects:[],events:[],diagnostics:[],totals:{}};
+    this.projectId = typeof saved.projectId === 'string' ? saved.projectId : '';
+    this.executionId = typeof saved.executionId === 'string' ? saved.executionId : '';
+    this.selections = new Map(Object.entries(saved.selections || {}));
+    this.view = saved.view === 'office' ? 'office' : 'panel';
+    this.filters = {source:'all',active:false,search:'',...saved.filters};
+    this.page = 0; this.connected = false; this.seen = new Set(); this.initialized = false;
+  }
+  context() { return {projectId:this.projectId,executionId:this.executionId,selections:Object.fromEntries(this.selections),view:this.view,filters:this.filters}; }
+  executions() { return this.snapshot.executions.filter(e=>!this.projectId || e.project_id===this.projectId || e.project_ids?.includes(this.projectId)); }
+  get execution() { return this.executions().find(e=>e.id===this.executionId); }
+  get agentId() { return this.selections.get(this.executionId) || ''; }
+  get agent() { return this.snapshot.agents.find(a=>a.id===this.agentId && a.execution_id===this.executionId); }
+  workers() { return this.snapshot.agents.filter(a=>a.execution_id===this.executionId && a.id!==this.execution?.leader_id); }
+  visibleAgents() { const q=this.filters.search.toLocaleLowerCase(); return this.workers().filter(a=>(this.filters.source==='all'||a.source===this.filters.source)&&(!this.filters.active||active.has(a.status))&&[a.name,a.id,a.task,a.model,a.provider].join(' ').toLocaleLowerCase().includes(q)); }
+  pageAgents() { return this.visibleAgents().slice(this.page*6,this.page*6+6); }
+  get pages() { return Math.max(1,Math.ceil(this.visibleAgents().length/6)); }
+  setPage(page) { this.page=Math.max(0,Math.min(this.pages-1,page)); }
+  setFilters(filters) { Object.assign(this.filters,filters); this.page=0; }
+  setView(view) { this.view=view==='office'?'office':'panel'; }
+  selectProject(id) { this.projectId=id; this.reconcile(); this.page=0; }
+  selectExecution(id) { if(this.executions().some(e=>e.id===id)) {this.executionId=id;this.reconcile();this.revealSelection();} }
+  selectAgent(id) { if(this.snapshot.agents.some(a=>a.id===id&&a.execution_id===this.executionId)) {this.selections.set(this.executionId,id);this.revealSelection();} }
+  revealSelection() { const index=this.visibleAgents().findIndex(a=>a.id===this.agentId);if(index>=0)this.page=Math.floor(index/6);else this.setPage(this.page); }
+  reconcile() {
+    if(this.projectId&&!this.snapshot.projects.some(p=>p.id===this.projectId))this.projectId='';
+    const candidates=this.executions();
+    if(!candidates.some(e=>e.id===this.executionId))this.executionId=[...candidates].sort((a,b)=>Number(active.has(b.status))-Number(active.has(a.status))||(Date.parse(b.started_at)||0)-(Date.parse(a.started_at)||0))[0]?.id||'';
+    const agents=this.snapshot.agents.filter(a=>a.execution_id===this.executionId);
+    if(!agents.some(a=>a.id===this.agentId))this.selections.set(this.executionId,this.workers()[0]?.id||agents[0]?.id||'');
+    this.setPage(this.page);
+  }
+  apply(snapshot) {
+    if(snapshot?.version!==1 || !['agents','executions','projects','events','diagnostics'].every(k=>Array.isArray(snapshot[k])) || !snapshot.totals)throw new Error('Snapshot incompatível');
+    // One sprite per canonical identity, including defensive duplicate handling.
+    this.snapshot={...snapshot,agents:[...new Map(snapshot.agents.map(a=>[a.id,a])).values()]};
+    this.connected=snapshot.connected===true;this.reconcile();
+    const effects=[];
+    for(const event of snapshot.events) {
+      if(!event.id || this.seen.has(event.id))continue;
+      this.seen.add(event.id);
+      if(!this.initialized || !this.connected || !event.evidence || event.is_live===false)continue;
+      const execution=snapshot.executions.find(e=>e.id===event.execution_id);
+      const known=id=>Boolean(id && (execution?.leader_id===id || this.snapshot.agents.some(a=>a.id===id&&a.execution_id===event.execution_id)));
+      if(!execution || !known(event.actor_id))continue;
+      if(event.kind==='result_available')effects.push({...event,effect:'completion'});
+      else if(['delegated','message','result_delivered'].includes(event.kind)&&known(event.target_id)&&event.actor_id!==event.target_id)effects.push({...event,effect:'interaction'});
+    }
+    this.initialized=true;return effects;
+  }
+  disconnect() { this.connected=false; }
+}

@@ -44,6 +44,7 @@ class Monitor:
         if interval < 0.1:
             raise ValueError("interval deve ser >= 0.1")
         self.adapters = adapters
+        self.demo = False
         self.interval = interval
         self._lock = threading.RLock()
         self._refresh_lock = threading.Lock()
@@ -141,6 +142,7 @@ class Monitor:
                 for key in execution.project_ids:
                     projects[key] = {"id": key, "name": Path(key).name or execution.project_name, "path": key}
             data = self._empty()
+            data["demo"] = self.demo
             statuses = [a.status for a in agents.values()]
             data.update(agents=[asdict(a) for a in agents.values()], executions=[asdict(e) for e in executions.values()],
                         events=list(self._events.values()), projects=sorted(projects.values(), key=lambda p: p["name"].casefold()),

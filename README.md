@@ -34,6 +34,8 @@ Não há comando instalável ainda. O nome proposto para a aplicação é `aleth
 
 ## Próximo passo
 
+V2 solicitada: **Kanban como terceira interface**. Planejamento em [docs/ROADMAP.md](docs/ROADMAP.md); a V1 mantém Painel e Escritório.
+
 Revisar/aprovar o desenho e a prévia atualizados. Depois, preparar o plano e implementar os adaptadores, a TUI e a cena com testes de detecção, estado e hierarquia.
 
 Os arquivos de sessão da prévia em `.superpowers/` ficam fora do Git; não publicar chaves do servidor, transcrições ou configurações de autenticação.
