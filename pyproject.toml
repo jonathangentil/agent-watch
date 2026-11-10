@@ -1,0 +1,24 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "alethe-tui"
+version = "0.1.0"
+description = "Monitor local de agentes Alethe, Claude Code e Codex"
+requires-python = ">=3.11"
+dependencies = ["textual>=0.89"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+alethe-tui = "alethe_tui.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/alethe_tui"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+testpaths = ["tests"]
