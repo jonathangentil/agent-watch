@@ -136,6 +136,8 @@ Alterar a apresentação preserva o contexto. As preferências de tema ficam sal
 - **Estado:** silêncio não comprova travamento. Conclusão de turno não comprova encerramento da sessão nem entrega do resultado ao líder. Sem evidência suficiente, o estado fica **não confirmado**.
 - **Animações:** delegação, resultado disponível e resultado entregue são eventos distintos. O histórico inicial não é animado. O modo **Charme decorativo** é opcional e não representa comunicação real; pausar animações não pausa agentes.
 
+No Escritório, **Cartas de tarefas** mostra um envelope seguindo a linha do remetente ao destinatário. Delegações enviam a carta ao agente; entregas de resultado comprovadas fazem o caminho de volta. Quando há somente conclusão, a carta com um visto aparece junto ao agente como resultado disponível, sem afirmar entrega ao líder. Cada evento anima até três vezes e a carta e a linha desaparecem. Atualizações e trocas de interface não repetem o evento. Desmarque a opção para ocultar imediatamente essas animações; a preferência fica salva no navegador, sem alterar estados ou histórico. Pausa e movimento reduzido também suprimem as cartas.
+
 A descoberta depende de artefatos locais persistidos e dos formatos suportados. Sessões remotas sem histórico local e raízes personalizadas não cadastradas podem não aparecer.
 
 ## Privacidade e execução local
@@ -172,4 +174,4 @@ node tests/web/browser-smoke.mjs
 
 A implementação Python fica em `src/alethe_tui/`; os arquivos da interface gráfica, em `src/alethe_tui/web/`. As duas interfaces consomem o mesmo contrato de snapshot.
 
-Consulte o [estado da entrega](docs/STATUS.md), o [desenho](docs/superpowers/specs/2026-11-09-alethe-tui-design.md) e o [roadmap](docs/ROADMAP.md). O Kanban está previsto para a V2.
+Consulte o [estado da entrega](docs/STATUS.md) e o [roadmap](docs/ROADMAP.md). O Kanban está previsto para a V2.

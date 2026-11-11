@@ -1,0 +1,8 @@
+/* A live event plays three times; animationend removes its whole overlay. */
+.scene .packet{offset-anchor:0px 0px;offset-rotate:0deg;animation:delivery 1.4s ease-in-out 3 both;filter:drop-shadow(0 2px 2px #0008)}
+.scene .envelope-body{stroke:#5a4936;stroke-width:1.5}
+.scene .envelope-fold{stroke:#5a4936;stroke-width:1.3}
+.scene .envelope-check{fill:#3c3059;stroke:none}
+.scene .completion-envelope{animation:mail-ready 1.4s ease-in-out 3 both;filter:drop-shadow(0 2px 2px #0008)}
+@keyframes mail-ready{0%,100%{opacity:0;transform:translateY(0)}20%,80%{opacity:1}50%{transform:translateY(-8px)}}
+@media(prefers-reduced-motion:reduce){.scene .packet,.scene .completion-envelope{animation:none}}

@@ -51,3 +51,30 @@ test('orchestration token totals use all canonical agents and qualify missing me
  assert.equal(executionTokens(data,'e1').partial,true);
  assert.equal(executionTokens(data,'e1').leaderReported,false);
 });
+
+test('active-only filters executions by confirmed activity and reconciles hidden focus',()=>{
+ const s=new MonitorState();
+ const data=snapshot({executions:[
+  {id:'running',source:'alethe',project_id:'p1',status:'running'},
+  {id:'done',source:'alethe',project_id:'p1',status:'succeeded'},
+  {id:'unknown',source:'codex',project_id:'p1',status:'unknown'},
+  {id:'native',source:'codex',project_id:'p1',status:'unknown'},
+  {id:'queued',source:'alethe',project_id:'p1',status:'queued'},
+  {id:'failed',source:'alethe',project_id:'p1',status:'failed'},
+ ],agents:[agent('finished','done',{status:'succeeded'}),agent('uncertain','unknown',{status:'unknown'}),agent('busy','native',{status:'running'})]});
+ s.apply(data);s.selectExecution('done');s.setFilters({active:true});
+ assert.deepEqual(s.executions().map(e=>e.id),['running','native','queued']);
+ assert.equal(s.executionId,'running');
+ s.setFilters({source:'codex'});assert.deepEqual(s.executions().map(e=>e.id),['native']);
+ const ended={...data,executions:data.executions.map(e=>({...e,status:'succeeded'})),agents:data.agents.map(a=>({...a,status:'turn_complete'}))};
+ s.apply(ended);assert.deepEqual(s.executions(),[]);assert.equal(s.executionId,'');
+ s.setFilters({source:'all',active:false});assert.equal(s.executions().length,6);
+});
+
+test('active-only combined with source requires activity in that source for mixed executions',()=>{
+ const s=new MonitorState();
+ s.apply(snapshot({executions:[{id:'mixed',source:'alethe',project_id:'p1',status:'unknown'}],
+  agents:[agent('done','mixed',{source:'claude',status:'turn_complete'}),agent('busy','mixed',{source:'codex',status:'running'})]}));
+ s.setFilters({active:true,source:'claude'});assert.equal(s.executions().length,0);
+ s.setFilters({source:'codex'});assert.deepEqual(s.executions().map(e=>e.id),['mixed']);
+});

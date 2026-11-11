@@ -1,12 +1,13 @@
 import {MonitorState,safeText,stateLabel,elapsed,runPages,executionTokens} from '/assets/state.mjs';
-import {buildScene,animateEvent} from '/assets/scene.mjs';
+import {buildScene,animateEvent,clearEventAnimations} from '/assets/scene.mjs';
 import {loadTheme,saveTheme,themeId} from '/assets/theme.mjs';
 const $=id=>document.getElementById(id);
 let themeStorage;try{themeStorage=localStorage}catch{}
+try{$('event-mail').checked=themeStorage?.getItem('agent-watch-event-mail')!=='false';}catch{/* Enabled by default without storage. */}
 function applyTheme(value){const id=themeId(value);document.documentElement.dataset.theme=id;$('theme').value=id;}
 applyTheme(loadTheme(themeStorage));
 $('theme').onchange=()=>{applyTheme($('theme').value);saveTheme($('theme').value,themeStorage)};
-window.addEventListener('storage',event=>{if(event.key==='alethe-monitor-theme')applyTheme(event.newValue)});
+window.addEventListener('storage',event=>{if(event.key==='alethe-monitor-theme')applyTheme(event.newValue);if(event.key==='agent-watch-event-mail'){$('event-mail').checked=event.newValue!=='false';applyMotion();}});
 const params=new URLSearchParams(location.search);
 let saved={};try{saved=JSON.parse(sessionStorage.getItem('alethe-monitor-context')||'{}')||{};}catch{/* Storage may be disabled. */}
 const state=new MonitorState(saved);
@@ -107,7 +108,7 @@ function render(){
   updateSidebars();
 }
 function eventDescription(event){const labels={delegated:'delegou tarefa',message:'enviou mensagem',result_delivered:'entregou resultado',result_available:'resultado disponível',started:'início registrado',tool:'ferramenta pública',failed:'falha registrada',waiting:'espera registrada'};return `${displayName(event.actor_id)} (${event.actor_id||'ator não informado'}) · ${labels[event.kind]||event.kind}${event.target_id?` → ${displayName(event.target_id)} (${event.target_id})`:''}${event.label?` · ${event.label}`:''}`;}
-function applyMotion(){document.body.classList.toggle('paused',paused);document.body.classList.toggle('reduced',$('reduce').checked);$('scene').classList.toggle('charming',$('charm').checked);$('pause').setAttribute('aria-pressed',String(paused));text('pause',paused?'▷ Retomar animações':'Ⅱ Pausar animações');if($('reduce').checked||paused)scene?.overlay.replaceChildren();}
+function applyMotion(){document.body.classList.toggle('paused',paused);document.body.classList.toggle('reduced',$('reduce').checked);$('scene').classList.toggle('charming',$('charm').checked);$('pause').setAttribute('aria-pressed',String(paused));text('pause',paused?'▷ Retomar animações':'Ⅱ Pausar animações');if($('reduce').checked||paused||!$('event-mail').checked)clearEventAnimations(scene);}
 async function loadDetail(){
   const agent=state.agent,key=`${agent?.id||''}:${kind}`;
   if(!agent){detailController?.abort();detailController=null;detailKey=key;text('output','Selecione um agente para consultar o detalhe.');return;}
@@ -128,16 +129,17 @@ async function loadDetail(){
 }
 async function poll(){
   if(busy)return;busy=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4500);
-  try{const response=await fetch('/api/snapshot',{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const effects=state.apply(await response.json());lastSuccess=new Date();connectionError='';render();for(const event of effects){if(event.execution_id!==state.executionId)continue;text('last-event',eventDescription(event));if(state.view==='office'&&!paused)animateEvent(scene,event,$('reduce').checked);}if(!detailController)void loadDetail();}
+  try{const response=await fetch('/api/snapshot',{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const effects=state.apply(await response.json());lastSuccess=new Date();connectionError='';render();for(const event of effects){if(event.execution_id!==state.executionId)continue;text('last-event',eventDescription(event));if(state.view==='office'&&!paused&&$('event-mail').checked)animateEvent(scene,event,$('reduce').checked);}if(!detailController)void loadDetail();}
   catch(error){state.disconnect();connectionError=controller.signal.aborted?'tempo de resposta esgotado':error.message;detailController?.abort();detailController=null;render();}
   finally{clearTimeout(timeout);busy=false;}
 }
 $('project').onchange=()=>{state.selectProject($('project').value);render();void loadDetail();};$('execution').onchange=()=>selectExecution($('execution').value);
-for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>{state.setView(button.dataset.view);const url=new URL(location.href);url.searchParams.set('view',state.view);history.replaceState(null,'',url);render();};
+for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>{state.setView(button.dataset.view);if(state.view!=='office')clearEventAnimations(scene);const url=new URL(location.href);url.searchParams.set('view',state.view);history.replaceState(null,'',url);render();};
 for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;render();void loadDetail();};
 function filter(){state.setFilters({source:$('source').value,active:$('active').checked,search:$('search').value});render();}
 $('source').onchange=filter;$('active').onchange=filter;$('search').oninput=filter;
 $('pause').onclick=()=>{paused=!paused;applyMotion();};$('charm').onchange=applyMotion;$('reduce').onchange=applyMotion;$('refresh').onclick=poll;
+$('event-mail').onchange=()=>{try{themeStorage?.setItem('agent-watch-event-mail',String($('event-mail').checked));}catch{/* Preference remains usable without storage. */}applyMotion();};
 $('popout').onclick=()=>{persist();const url=new URL(location.origin+location.pathname);url.searchParams.set('compact','1');url.searchParams.set('view',state.view);url.searchParams.set('execution',state.executionId);url.searchParams.set('project',state.projectId);url.searchParams.set('agent',state.agentId);if(!window.open(url.href,'alethe-monitor-compact','width=860,height=780,resizable=yes,scrollbars=yes'))text('popout','Janela bloqueada pelo navegador');};
 document.addEventListener('keydown',e=>{if(['INPUT','SELECT','TEXTAREA','BUTTON'].includes(e.target.tagName)||e.ctrlKey||e.altKey||e.metaKey)return;if(e.key==='/'){e.preventDefault();$('search').focus();}else if(e.key==='a'){$('active').checked=!$('active').checked;filter();}else if(e.key==='r')void poll();else if(e.key==='l'){const tabs=['output','task','result','error'];kind=tabs[(tabs.indexOf(kind)+1)%tabs.length];render();void loadDetail();}});
 for(const view of ['panel','office']){

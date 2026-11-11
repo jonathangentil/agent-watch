@@ -40,7 +40,16 @@ export class MonitorState {
     this.connected = false; this.seen = new Set(); this.initialized = false;
   }
   context() { return {projectId:this.projectId,executionId:this.executionId,selections:Object.fromEntries(this.selections),view:this.view,filters:this.filters}; }
-  executions() { return this.snapshot.executions.filter(e=>(!this.projectId || e.project_id===this.projectId || e.project_ids?.includes(this.projectId))&&(this.filters.source==='all'||e.source===this.filters.source||this.snapshot.agents.some(a=>a.execution_id===e.id&&a.source===this.filters.source))); }
+  executions() {
+    const matchesSource=actor=>this.filters.source==='all'||actor.source===this.filters.source;
+    return this.snapshot.executions.filter(e=>{
+      if(this.projectId&&e.project_id!==this.projectId&&!e.project_ids?.includes(this.projectId))return false;
+      const agents=this.snapshot.agents.filter(a=>a.execution_id===e.id&&matchesSource(a));
+      const ownSource=matchesSource(e);
+      if(!ownSource&&!agents.length)return false;
+      return !this.filters.active||(ownSource&&active.has(e.status))||agents.some(a=>active.has(a.status));
+    });
+  }
   get execution() { return this.executions().find(e=>e.id===this.executionId); }
   get agentId() { return this.selections.get(this.executionId) || ''; }
   get agent() { return this.snapshot.agents.find(a=>a.id===this.agentId && a.execution_id===this.executionId); }
