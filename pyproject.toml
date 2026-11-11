@@ -7,6 +7,7 @@ name = "alethe-tui"
 version = "0.1.0"
 description = "Agent Watch: monitor local de agentes Alethe, Claude Code e Codex"
 requires-python = ">=3.11"
+license = "MIT"
 dependencies = ["textual==8.2.8"]
 
 [project.optional-dependencies]
