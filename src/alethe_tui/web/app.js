@@ -1,6 +1,8 @@
 import {MonitorState,safeText,stateLabel,elapsed,runPages,executionTokens} from '/assets/state.mjs';
 import {buildScene,animateEvent,clearEventAnimations} from '/assets/scene.mjs';
 import {loadTheme,saveTheme,themeId} from '/assets/theme.mjs';
+import {columnMap,planMoves,pipelineActive,badgeLabel,taskTitle} from '/assets/board.mjs';
+import {renderBoard,measure,animateMoves,cancelMoves} from '/assets/kanban.mjs';
 const $=id=>document.getElementById(id);
 let themeStorage;try{themeStorage=localStorage}catch{}
 try{$('event-mail').checked=themeStorage?.getItem('agent-watch-event-mail')!=='false';}catch{/* Enabled by default without storage. */}
@@ -11,15 +13,15 @@ window.addEventListener('storage',event=>{if(event.key==='alethe-monitor-theme')
 const params=new URLSearchParams(location.search);
 let saved={};try{saved=JSON.parse(sessionStorage.getItem('alethe-monitor-context')||'{}')||{};}catch{/* Storage may be disabled. */}
 const state=new MonitorState(saved);
-if(['office','panel'].includes(params.get('view')))state.setView(params.get('view'));
+if(['office','panel','kanban'].includes(params.get('view')))state.setView(params.get('view'));
 if(params.get('execution'))state.executionId=params.get('execution');
 if(params.has('project'))state.projectId=params.get('project');
 if(params.get('agent'))state.selections.set(state.executionId,params.get('agent'));
 if(params.has('compact'))document.body.classList.add('compact');
 let kind='output',scene=null,paused=false,detailController=null,detailKey='',busy=false;
-let connectionError='',lastSuccess=null;
+let connectionError='',lastSuccess=null,renderedExecution=null,renderedView=null,kanbanDetailOpen=false,kanbanDetailTrigger=null;
 const signatures=new Map();
-const sidebars={panel:{page:0,selected:null,ids:''},office:{page:0,selected:null,ids:''}};
+const sidebars={panel:{page:0,selected:null,ids:''},office:{page:0,selected:null,ids:''},kanban:{page:0,selected:null,ids:''}};
 const motion=matchMedia('(prefers-reduced-motion: reduce)');$('reduce').checked=motion.matches;
 motion.addEventListener('change',e=>{$('reduce').checked=e.matches;applyMotion();});
 function text(id,value){$(id).textContent=safeText(value);}
@@ -29,10 +31,11 @@ function changed(key,value,render){const signature=JSON.stringify(value);if(sign
 function persist(){try{sessionStorage.setItem('alethe-monitor-context',JSON.stringify(state.context()));}catch{/* View remains usable without storage. */}}
 function choice(select,items,current){const signature=JSON.stringify(items);if(select.dataset.signature!==signature){select.replaceChildren(...items.map(([value,label])=>{const option=el('option',label);option.value=value;return option;}));select.dataset.signature=signature;}select.value=current;}
 const displayName=id=>state.snapshot.agents.find(a=>a.id===id)?.name||state.snapshot.executions.find(e=>e.leader_id===id)?.leader_name||id||'não informado';
-function selectAgent(id){state.selectAgent(id);render();loadDetail();}
+function selectAgent(id){state.selectAgent(id);if(state.view==='kanban'){kanbanDetailOpen=true;kanbanDetailTrigger=document.activeElement?.closest('.kanban-card')?document.activeElement:[...$('board').querySelectorAll('[data-task-id]')].find(node=>node.dataset.taskId===state.tasks().find(task=>task.agent_id===id||task.testers?.includes(id))?.id)?.querySelector('.kanban-open')||null;}render();loadDetail();}
+function closeKanbanDetail(){kanbanDetailOpen=false;detailController?.abort();detailController=null;render();kanbanDetailTrigger?.focus({preventScroll:true});}
 function selectExecution(id){state.selectExecution(id);render();loadDetail();}
 function updateSidebar(view){
-  const nav=$(view==='office'?'office-runs':'runs'),content=view==='office'?$('office'):document.querySelector('.panel-main');
+  const nav=$(view==='panel'?'runs':`${view}-runs`),content=view==='panel'?document.querySelector('.panel-main'):$(view);
   if(!content.offsetHeight)return;
   const aside=nav.closest('aside'),pager=$(`${view}-run-pages`),sidebar=sidebars[view];
   aside.style.setProperty('--sidebar-content-height',`${content.getBoundingClientRect().height}px`);
@@ -52,9 +55,9 @@ function updateSidebar(view){
   pager.querySelector('[data-page-label]').textContent=`${sidebar.page+1} / ${pages.length}`;
   pager.classList.toggle('single-page',pages.length===1);
 }
-function updateSidebars(){for(const view of ['panel','office'])updateSidebar(view);}
+function updateSidebars(){for(const view of ['panel','office','kanban'])updateSidebar(view);}
 function render(){
-  persist();const snap=state.snapshot,run=state.execution,agent=state.agent;
+  const before=measure($('board'));if(renderedExecution!==state.executionId||renderedView!==state.view){cancelMoves($('board'));kanbanDetailOpen=false;kanbanDetailTrigger=null;}renderedExecution=state.executionId;renderedView=state.view;persist();const snap=state.snapshot,run=state.execution,agent=state.agent;
   document.body.classList.toggle('disconnected',!state.connected);
   text('connection',(snap.demo?'DEMONSTRAÇÃO · dados fictícios · ':'')+(state.connected?`● Acompanhando · atualizado ${lastSuccess?.toLocaleTimeString('pt-BR')||'agora'}`:`○ Desconectado · ${connectionError||'monitor indisponível'}${lastSuccess?' · mantendo última leitura válida':''}`));
   const totals=snap.totals;
@@ -64,12 +67,13 @@ function render(){
   choice($('execution'),executions.length?executions.map(e=>[e.id,`${e.project_name||e.project_id} / ${e.title} · ${e.source} · ${e.id}`]):[['','Nenhuma execução encontrada']],state.executionId);
   for(const button of document.querySelectorAll('[data-view]'))button.setAttribute('aria-selected',String(button.dataset.view===state.view));
   $('panel').hidden=state.view!=='panel';$('office').hidden=state.view!=='office';
-  $('office-layout').hidden=state.view!=='office';
+  $('office-layout').hidden=state.view!=='office';$('kanban-layout').hidden=state.view!=='kanban';$('kanban').hidden=state.view!=='kanban';$('agent-details').hidden=state.view==='kanban';
+  const tools=document.querySelector('.motion-tools'),host=state.view==='kanban'?$('kanban-motion'):document.querySelector('.office-toolbar');if(tools.parentNode!==host)host.append(tools);
   text('focus-label',run?`${run.project_name||run.project_id} / ${run.title} · ${run.id}${run.project_ids?.length>1?' · múltiplos projetos':''} · agente: ${agent?.name||state.agentId||'nenhum'}`:'Nenhuma execução encontrada nas fontes observadas.');
   $('source').value=state.filters.source;$('active').checked=state.filters.active;
   if(document.activeElement!==$('search'))$('search').value=state.filters.search;
   text('filter-count',`${state.visibleAgents().length} visíveis / ${state.workers().length} workers nesta execução`);
-  changed('runs',[executions,state.executionId],()=>{for(const id of ['runs','office-runs'])$(id).replaceChildren(...executions.map(e=>{const button=el('button',undefined,`run ${e.id===state.executionId?'selected':''}`);button.dataset.runId=e.id;button.title=e.title;button.setAttribute('aria-pressed',String(e.id===state.executionId));button.append(el('span',e.title),el('small',`${e.project_name||e.project_id} · ${e.source} · ${stateLabel(e.status)}`));button.onclick=()=>selectExecution(e.id);return button;}));});
+  changed('runs',[executions,state.executionId],()=>{for(const id of ['runs','office-runs','kanban-runs'])$(id).replaceChildren(...executions.map(e=>{const button=el('button',undefined,`run ${e.id===state.executionId?'selected':''}`);button.dataset.runId=e.id;button.title=e.title;button.setAttribute('aria-pressed',String(e.id===state.executionId));button.append(el('span',e.title),el('small',`${e.project_name||e.project_id} · ${e.source} · ${stateLabel(e.status)}`));button.onclick=()=>selectExecution(e.id);return button;}));});
   text('run-title',run?.title||'Nenhuma execução encontrada');
   text('run-meta',run?`${run.source} · ${run.id} · ${run.project_path||'diretório não informado'}`:'O monitor aguarda fontes disponíveis.');
   text('run-status',run?stateLabel(run.status):'estado não confirmado');
@@ -105,48 +109,56 @@ function render(){
   changed('events',[events,state.executionId],()=>{$('events').replaceChildren(...events.map(e=>el('li',`${e.timestamp||'instante não informado'} · ${eventDescription(e)} · evidência: ${e.evidence||'não informada'}`)));});
   const diagnostics=snap.diagnostics;text('diagnostic-summary',`Fontes e diagnósticos · ${diagnostics.length} registros${diagnostics.some(d=>!['ok','available'].includes(d.status))?' · verificar avisos':''}`);
   changed('diagnostics',diagnostics,()=>{$('diagnostics').replaceChildren(...(diagnostics.length?diagnostics.map(d=>el('li',`${d.source} · ${d.status} · ${d.path||'raiz não informada'} · ${d.message||'sem mensagem'}`)):[el('li','Nenhum diagnóstico informado pelo monitor.') ]));});
-  updateSidebars();
+  text('kanban-heading',run?`${run.title} · ${state.tasks().length} tarefas`:'Aguardando descoberta');
+  renderBoard($('board'),{tasks:state.tasks(),agents:snap.agents,selectedAgentId:state.agentId,pipeline:pipelineActive(snap.agents,state.executionId),onSelect:task=>selectAgent(task.agent_id),onSelectTester:selectAgent});
+  $('kanban-detail').hidden=!kanbanDetailOpen;document.querySelector('.kanban-content').classList.toggle('detail-open',kanbanDetailOpen);
+  const task=state.tasks().find(t=>t.agent_id===state.agentId)||state.tasks().find(t=>t.testers?.includes(state.agentId));
+  text('kanban-detail-name',task?`${taskTitle(task)} · ${agent?.name||state.agentId}`:agent?.name||'Nenhum agente selecionado');text('kanban-evidence',task?.column_evidence||agent?.evidence||'');
+  $('kanban-badges').replaceChildren(...(task?.badges||[]).map(code=>el('span',badgeLabel(code,task),'kanban-chip')));
+  updateSidebars();return before;
 }
 function eventDescription(event){const labels={delegated:'delegou tarefa',message:'enviou mensagem',result_delivered:'entregou resultado',result_available:'resultado disponível',started:'início registrado',tool:'ferramenta pública',failed:'falha registrada',waiting:'espera registrada'};return `${displayName(event.actor_id)} (${event.actor_id||'ator não informado'}) · ${labels[event.kind]||event.kind}${event.target_id?` → ${displayName(event.target_id)} (${event.target_id})`:''}${event.label?` · ${event.label}`:''}`;}
-function applyMotion(){document.body.classList.toggle('paused',paused);document.body.classList.toggle('reduced',$('reduce').checked);$('scene').classList.toggle('charming',$('charm').checked);$('pause').setAttribute('aria-pressed',String(paused));text('pause',paused?'▷ Retomar animações':'Ⅱ Pausar animações');if($('reduce').checked||paused||!$('event-mail').checked)clearEventAnimations(scene);}
+function applyMotion(){document.body.classList.toggle('paused',paused);document.body.classList.toggle('reduced',$('reduce').checked);$('scene').classList.toggle('charming',$('charm').checked);$('pause').setAttribute('aria-pressed',String(paused));text('pause',paused?'▷ Retomar animações':'Ⅱ Pausar animações');if($('reduce').checked||paused||!$('event-mail').checked)clearEventAnimations(scene);if($('reduce').checked||paused)cancelMoves($('board'));}
 async function loadDetail(){
-  const agent=state.agent,key=`${agent?.id||''}:${kind}`;
-  if(!agent){detailController?.abort();detailController=null;detailKey=key;text('output','Selecione um agente para consultar o detalhe.');return;}
-  if(!state.connected){if(key!==detailKey){detailController?.abort();detailController=null;detailKey=key;text('output','Detalhe indisponível · monitor desconectado.');}return;}
+  if(state.view==='kanban'&&!kanbanDetailOpen){detailController?.abort();detailController=null;return;}
+  const target=state.view==='kanban'?'kanban-output':'output',agent=state.agent,key=`${target}:${agent?.id||''}:${kind}`;
+  if(!agent){detailController?.abort();detailController=null;detailKey=key;text(target,'Selecione um agente para consultar o detalhe.');return;}
+  if(!state.connected){if(key!==detailKey){detailController?.abort();detailController=null;detailKey=key;text(target,'Detalhe indisponível · monitor desconectado.');}return;}
   detailController?.abort();const controller=new AbortController();detailController=controller;
-  if(key!==detailKey){text('output','Carregando detalhe…');$('output').scrollTop=0;detailKey=key;}
+  if(key!==detailKey){text(target,'Carregando detalhe…');$(target).scrollTop=0;detailKey=key;}
   const timeout=setTimeout(()=>controller.abort(),4500);
   try{
     const query=new URLSearchParams({agent:agent.id,kind});
     const response=await fetch(`/api/detail?${query}`,{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});
     if(!response.ok)throw new Error(`HTTP ${response.status}`);
     const data=await response.json();if(typeof data.text!=='string')throw new Error('Resposta de detalhe incompatível');
-    if(controller!==detailController||key!==`${state.agent?.id}:${kind}`)return;
+    if(controller!==detailController||key!==`${state.view==='kanban'?'kanban-output':'output'}:${state.agent?.id}:${kind}`)return;
     const value=safeText(data.text).slice(-65536).split('\n').slice(-2000).join('\n')||'Conteúdo não informado.';
-    if($('output').textContent!==value){const scroll=$('output').scrollTop;text('output',value);$('output').scrollTop=$('follow').checked?$('output').scrollHeight:scroll;}
-  }catch(error){if(controller!==detailController)return;if(controller.signal.aborted)text('output','Detalhe indisponível · tempo de resposta esgotado.');else text('output',`Detalhe indisponível · ${error.message}`);}
+    if($(target).textContent!==value){const scroll=$(target).scrollTop;text(target,value);$(target).scrollTop=target==='kanban-output'?scroll:$('follow').checked?$(target).scrollHeight:scroll;}
+  }catch(error){if(controller!==detailController)return;if(controller.signal.aborted)text(target,'Detalhe indisponível · tempo de resposta esgotado.');else text(target,`Detalhe indisponível · ${error.message}`);}
   finally{clearTimeout(timeout);if(controller===detailController)detailController=null;}
 }
 async function poll(){
   if(busy)return;busy=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4500);
-  try{const response=await fetch('/api/snapshot',{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const effects=state.apply(await response.json());lastSuccess=new Date();connectionError='';render();for(const event of effects){if(event.execution_id!==state.executionId)continue;text('last-event',eventDescription(event));if(state.view==='office'&&!paused&&$('event-mail').checked)animateEvent(scene,event,$('reduce').checked);}if(!detailController)void loadDetail();}
+  try{const response=await fetch('/api/snapshot',{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const previousExecution=state.executionId,previousColumns=state.initialized?columnMap(state.tasks()):null;const effects=state.apply(await response.json()),moves=planMoves(previousColumns,state.tasks());lastSuccess=new Date();connectionError='';const before=render();if(state.view==='kanban'&&previousExecution===state.executionId)animateMoves($('board'),before,moves,{reduced:$('reduce').checked||motion.matches,paused});for(const event of effects){if(event.execution_id!==state.executionId)continue;text('last-event',eventDescription(event));if(state.view==='office'&&!paused&&$('event-mail').checked)animateEvent(scene,event,$('reduce').checked);}if(!detailController)void loadDetail();}
   catch(error){state.disconnect();connectionError=controller.signal.aborted?'tempo de resposta esgotado':error.message;detailController?.abort();detailController=null;render();}
   finally{clearTimeout(timeout);busy=false;}
 }
 $('project').onchange=()=>{state.selectProject($('project').value);render();void loadDetail();};$('execution').onchange=()=>selectExecution($('execution').value);
-for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>{state.setView(button.dataset.view);if(state.view!=='office')clearEventAnimations(scene);const url=new URL(location.href);url.searchParams.set('view',state.view);history.replaceState(null,'',url);render();};
+for(const button of document.querySelectorAll('[data-view]'))button.onclick=()=>{state.setView(button.dataset.view);if(state.view!=='office')clearEventAnimations(scene);const url=new URL(location.href);url.searchParams.set('view',state.view);history.replaceState(null,'',url);render();void loadDetail();};
 for(const button of document.querySelectorAll('[data-kind]'))button.onclick=()=>{kind=button.dataset.kind;render();void loadDetail();};
 function filter(){state.setFilters({source:$('source').value,active:$('active').checked,search:$('search').value});render();}
 $('source').onchange=filter;$('active').onchange=filter;$('search').oninput=filter;
 $('pause').onclick=()=>{paused=!paused;applyMotion();};$('charm').onchange=applyMotion;$('reduce').onchange=applyMotion;$('refresh').onclick=poll;
 $('event-mail').onchange=()=>{try{themeStorage?.setItem('agent-watch-event-mail',String($('event-mail').checked));}catch{/* Preference remains usable without storage. */}applyMotion();};
 $('popout').onclick=()=>{persist();const url=new URL(location.origin+location.pathname);url.searchParams.set('compact','1');url.searchParams.set('view',state.view);url.searchParams.set('execution',state.executionId);url.searchParams.set('project',state.projectId);url.searchParams.set('agent',state.agentId);if(!window.open(url.href,'alethe-monitor-compact','width=860,height=780,resizable=yes,scrollbars=yes'))text('popout','Janela bloqueada pelo navegador');};
-document.addEventListener('keydown',e=>{if(['INPUT','SELECT','TEXTAREA','BUTTON'].includes(e.target.tagName)||e.ctrlKey||e.altKey||e.metaKey)return;if(e.key==='/'){e.preventDefault();$('search').focus();}else if(e.key==='a'){$('active').checked=!$('active').checked;filter();}else if(e.key==='r')void poll();else if(e.key==='l'){const tabs=['output','task','result','error'];kind=tabs[(tabs.indexOf(kind)+1)%tabs.length];render();void loadDetail();}});
-for(const view of ['panel','office']){
+$('kanban-close').onclick=closeKanbanDetail;
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.view==='kanban'&&kanbanDetailOpen){e.preventDefault();closeKanbanDetail();return;}if(['INPUT','SELECT','TEXTAREA','BUTTON'].includes(e.target.tagName)||e.ctrlKey||e.altKey||e.metaKey)return;if(e.key==='/'){e.preventDefault();$('search').focus();}else if(e.key==='a'){$('active').checked=!$('active').checked;filter();}else if(e.key==='r')void poll();else if(e.key==='l'){const tabs=['output','task','result','error'];kind=tabs[(tabs.indexOf(kind)+1)%tabs.length];render();void loadDetail();}});
+for(const view of ['panel','office','kanban']){
   $(`${view}-run-pages`).querySelector('[data-page-previous]').onclick=()=>{sidebars[view].page--;updateSidebar(view);};
   $(`${view}-run-pages`).querySelector('[data-page-next]').onclick=()=>{sidebars[view].page++;updateSidebar(view);};
 }
 const sidebarObserver=new ResizeObserver(updateSidebars);
-sidebarObserver.observe($('office'));sidebarObserver.observe(document.querySelector('.panel-main'));
+sidebarObserver.observe($('kanban'));sidebarObserver.observe($('office'));sidebarObserver.observe(document.querySelector('.panel-main'));
 new ResizeObserver(()=>render()).observe($('scene'));
 applyMotion();render();void poll();setInterval(poll,1000);

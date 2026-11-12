@@ -62,6 +62,41 @@ class Demo:
         self.state = {"status": "running", "runnerPid": os.getpid(), "startedAt": _now(), "workers": workers}
         _write(self.wave / "state.json", self.state)
         _write(self.wave / "plan.json", {"title": "Demonstração", "workers": plan})
+        # The pipeline shares the demonstration execution and uses only temporary artifacts.
+        build_workers = self.state["workers"]
+        build_workers["dev-core"].update(status="succeeded", finishedAt=_now())
+        build_workers["dev-ui"] = {"status": "succeeded", "cwd": str(self.project_a),
+                                   "provider": "codex", "startedAt": _now(), "finishedAt": _now()}
+        for name in ("dev-core", "dev-ui"):
+            entry = next((w for w in plan if w["id"] == name), None)
+            if entry is None:
+                entry = {"id": name, "task": "Ajustar layout responsivo fictício", "cwd": str(self.project_a)}
+                plan.append(entry)
+            entry["contract"] = "developer"
+            folder = self.wave / "workers" / name
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / "diff.patch").write_text("diff fictício; não é lido pelo monitor\n", encoding="utf-8")
+            (folder / "result.md").write_text("Implementação fictícia concluída.\n", encoding="utf-8")
+            _write(folder / "outcome.json", {"status": "succeeded", "diffRevision": "rev-demo1"})
+        _write(self.wave / "state.json", self.state)
+        _write(self.wave / "plan.json", {"title": "Demonstração", "workers": plan})
+        check = self.wave.parent / "02-check"
+        _write(check / "state.json", {"status": "succeeded", "startedAt": _now(), "workers": {
+            "qa-1": {"status": "succeeded", "cwd": str(self.project_a), "provider": "codex", "startedAt": _now(), "finishedAt": _now()}}})
+        _write(check / "plan.json", {"workers": [{"id": "qa-1", "contract": "qa", "revision": "rev-demo1",
+                                                "task": "Validar implementação fictícia", "cwd": str(self.project_a)}]})
+        _write(self.wave.parent / "gate-01.json", {"gate": 1, "decision": "REJECTED", "at": _now(),
+            "revision": "rev-demo1", "developers": ["dev-core", "dev-ui"], "qa": ["qa-1"], "reviewers": []})
+        self.fix_wave = self.wave.parent / "03-fix"
+        self.fix_state = {"status": "running", "runnerPid": os.getpid(), "startedAt": _now(), "workers": {
+            "dev-core": {"status": "running", "startedAt": _now(), "cwd": str(self.project_a), "provider": "codex"}}}
+        _write(self.fix_wave / "state.json", self.fix_state)
+        _write(self.fix_wave / "plan.json", {"workers": [{"id": "dev-core", "contract": "developer",
+            "task": "Corrigir revisão fictícia rejeitada pelo gate", "cwd": str(self.project_a), "model": "modelo de exemplo"}]})
+        fix_worker = self.fix_wave / "workers/dev-core"
+        fix_worker.mkdir(parents=True)
+        (fix_worker / "diff.patch").write_text("correção fictícia\n", encoding="utf-8")
+        (fix_worker / "stdout.log").write_text("Correção fictícia em andamento.\n", encoding="utf-8")
         self.claude_parent = self.claude_root / "projeto-demo/demo-session.jsonl"
         for index in range(2):
             identity = f"demo-claude-{index}"
@@ -90,6 +125,11 @@ class Demo:
     def advance(self):
         self._phase += 1
         if self._phase == 1:
+            self.fix_state["workers"]["dev-core"].update(status="succeeded", finishedAt=_now())
+            self.fix_state["status"] = "succeeded"
+            _write(self.fix_wave / "state.json", self.fix_state)
+            _write(self.fix_wave / "workers/dev-core/outcome.json", {"status": "succeeded", "diffRevision": "rev-demo2"})
+            (self.fix_wave / "workers/dev-core/result.md").write_text("Correção fictícia concluída.\n", encoding="utf-8")
             self.state["workers"]["test-suite"].update(status="running", startedAt=_now())
             _write(self.wave / "state.json", self.state)
         elif self._phase == 2:

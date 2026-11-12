@@ -68,7 +68,7 @@ class LocalServer:
                         self.error(HTTPStatus.UNAUTHORIZED, "Sessão local inválida")
                         return
                     view = query.get("view", ["office"])[0]
-                    params = {"view": view if view in {"office", "panel"} else "office"}
+                    params = {"view": view if view in {"office", "panel", "kanban"} else "office"}
                     if query.get("compact") == ["1"]:
                         params["compact"] = "1"
                     self.send_data(HTTPStatus.SEE_OTHER, b"", extra={"Location": "/?" + urlencode(params),

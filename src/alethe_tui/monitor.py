@@ -11,6 +11,7 @@ import subprocess
 import threading
 
 from .model import ScanResult
+from .board import build_tasks
 from .adapters._metadata import task_summary
 
 
@@ -73,7 +74,7 @@ class Monitor:
     @staticmethod
     def _empty():
         return {"version": 1, "generated_at": _iso_now(), "connected": True, "agents": [], "executions": [],
-                "events": [], "diagnostics": [], "projects": [], "totals": {"projects": 0, "executions": 0, "agents": 0,
+                "tasks": [], "events": [], "diagnostics": [], "projects": [], "totals": {"projects": 0, "executions": 0, "agents": 0,
                 "running": 0, "queued": 0, "completed": 0, "failed": 0}}
 
     def refresh(self) -> dict:
@@ -182,6 +183,11 @@ class Monitor:
                                     for actor in (item['actor_id'], item['target_id']))],
                         projects=sorted(projects.values(), key=lambda p: p["name"].casefold()),
                         diagnostics=diagnostics, generated_at=_iso_now())
+            gates = [replace(g, execution_id=canonical(g.execution_id, execution_alias))
+                     for batch in batches for g in batch.gates
+                     if canonical(g.execution_id, execution_alias) in executions]
+            summarized = [replace(a, task=task_summary(a.task)) for a in agents.values()]
+            data["tasks"] = [asdict(task) for task in build_tasks(summarized, data["events"], gates, executions.values())]
             data["totals"] = {"projects": len(projects), "executions": len(executions), "active_executions": len(active), "agents": len(agents),
                               "running": statuses.count("running"), "queued": statuses.count("queued"),
                               "completed": sum(s in {"succeeded", "turn_complete"} for s in statuses),

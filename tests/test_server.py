@@ -90,3 +90,15 @@ def test_foreign_host_is_rejected(server):
 def test_server_only_binds_loopback():
     with pytest.raises(ValueError, match="127.0.0.1"):
         LocalServer(Data(), host="0.0.0.0")
+
+
+@pytest.mark.parametrize(('view', 'expected'), [
+    ('kanban', 'kanban'), ('panel', 'panel'), ('office', 'office'), ('evil', 'office'),
+])
+def test_login_preserves_supported_view_and_defaults_unknown_to_office(server, view, expected):
+    parsed = urlsplit(server.url(view=view))
+    status, headers, _ = request(server, parsed.path + '?' + parsed.query)
+    assert status == 303
+    assert headers['Location'] == '/?view=' + expected
+    cookie = {'Cookie': headers['Set-Cookie'].split(';', 1)[0]}
+    assert request(server, headers['Location'], cookie)[0] == 200

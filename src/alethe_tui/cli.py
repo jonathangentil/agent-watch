@@ -23,6 +23,7 @@ def build_monitor(config, demo=False):
 def parser():
     result = argparse.ArgumentParser(description="Agent Watch: acompanhe agentes Alethe, Claude Code e Codex no terminal ou em uma janela local.")
     result.add_argument("--web", action="store_true", help="servidor gráfico sem interface de terminal")
+    result.add_argument("--kanban", action="store_true", help="abrir o quadro Kanban ao iniciar")
     result.add_argument("--office", action="store_true", help="abrir o escritório visual ao iniciar")
     result.add_argument("--no-open", action="store_true", help="não abrir o navegador automaticamente")
     result.add_argument("--port", type=int, default=0, help="porta local (0 escolhe uma disponível)")
@@ -61,12 +62,12 @@ def main(argv=None):
             raise ValueError("A TUI precisa de um terminal interativo. Use --web ou --snapshot neste ambiente.")
         from .server import LocalServer
         server = LocalServer(monitor, port=args.port).start()
-        view = "office" if args.office else "panel"
+        view = "kanban" if args.kanban else "office" if args.office else "panel"
         print("Agent Watch · " + ("DEMONSTRAÇÃO · dados fictícios\n" if demo else "Monitor local · somente leitura\n") + server.url(view=view), flush=True)
         monitor.start()
         if demo:
             demo.start()
-        if not args.no_open and (args.web or args.office):
+        if not args.no_open and (args.web or args.office or args.kanban):
             if not open_browser(server.url(view=view)):
                 print("O navegador não abriu. Use a URL de sessão exibida acima.", file=sys.stderr)
         if args.web:
