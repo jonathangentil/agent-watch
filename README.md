@@ -1,14 +1,40 @@
 # Agent Watch
 
-Acompanhe orquestrações **Alethe** e subagentes do **Claude Code** e do **Codex** em um monitor local, somente leitura.
+**Visualizador local de orquestrações de agentes de IA.** O Agent Watch mostra quem está trabalhando, em qual tarefa, quem delegou para quem e o que já foi entregue, sem interferir nos agentes. Ele lê os artefatos que as ferramentas de orquestração já gravam em disco e os apresenta em três visões da mesma execução:
 
-Use o **Painel** para consultar agentes, tarefas, saídas e consumo de tokens. Alterne para o **Escritório** para acompanhar a mesma execução em uma sala visual, com estados e interações ligados aos eventos registrados pelas fontes, ou para o **Kanban** para ver cada tarefa na coluna comprovada pelos artefatos. A interface de terminal também está disponível.
+- **Painel:** agentes, tarefas, saídas, erros e consumo de tokens.
+- **Escritório:** uma sala visual em que delegações e entregas aparecem como eventos comprovados.
+- **Kanban:** cada tarefa na coluna que os artefatos comprovam, com replay das transições.
+
+Também há uma interface de terminal. Hoje ele acompanha a **Alethe** e os subagentes nativos do **Claude Code** e do **Codex**; outras fontes podem ser acrescentadas com um leitor novo (veja [Como funciona](#como-funciona)).
 
 ![Escritório do Agent Watch com dados fictícios: agentes na sala e cartas de tarefas entre eles](docs/images/office.gif)
 
 ![Kanban do Agent Watch com dados fictícios: cartão mudando de coluna, painel de detalhes e replay em 2×](docs/images/kanban.gif)
 
 *Demonstração com dados fictícios (`--demo`). Nenhum agente ou modelo foi iniciado para produzir as imagens. Capturas estáticas: [Escritório](docs/images/office.png) · [Painel](docs/images/panel.png) · [Kanban](docs/images/kanban.png).*
+
+## O que ele acompanha hoje
+
+| Fonte | O que aparece | Por que funciona |
+| --- | --- | --- |
+| **Alethe** | Orquestrações completas: ondas, workers de qualquer CLI (Codex, Claude Code, Agy, Kimi ou customizado), funções Planner, Developer, Reviewer e QA, revisões e decisões dos gates do pipeline | A Alethe grava em disco o plano, o estado e o resultado de cada onda e de cada worker, a tarefa enviada e as decisões dos gates (`plan.json`, `state.json`, `outcome.json`, `prompt.txt`, `gate-NN.json`) |
+| **Claude Code** | Subagentes nativos e o agente que os criou, com tarefa, estado, saída pública e tokens | O Claude Code registra cada sessão em JSONL, com a chamada de ferramenta que criou o subagente e o resultado devolvido |
+| **Codex** | Subagentes nativos ligados à sessão de origem, com início, conclusão e tokens | O Codex registra as sessões em JSONL, com `thread_spawn` e `parent_thread_id` ligando cada subagente ao seu pai |
+
+Quando um worker da Alethe é uma sessão do Claude Code ou do Codex, o monitor reconhece a mesma sessão nas duas fontes e mostra um agente só.
+
+**Fora do alcance hoje:** outros orquestradores (servidores de agentes, LangGraph, CrewAI, SDKs de agentes em código próprio), CLIs usados sozinhos fora da Alethe e sessões remotas ou na nuvem sem histórico local. Para eles, falta um leitor; o restante do monitor já está pronto para recebê-los.
+
+## Como funciona
+
+1. **Leitura passiva.** O monitor só lê os arquivos que as ferramentas já produzem. Ele não inicia, retoma nem interrompe agentes, não instala hooks, não altera configurações e não chama modelos. A leitura é incremental: arquivos grandes são lidos pela cauda, linhas incompletas são esperadas e um arquivo corrompido não derruba os demais.
+2. **Um leitor por fonte.** Cada formato tem um leitor em `src/alethe_tui/adapters/`. Ele traduz o que encontra para um contrato comum: **agentes** (quem, função, modelo, estado, tarefa), **execuções** (projeto, líder, início), **eventos** (delegou, começou, resultado disponível, resultado entregue, falhou) e, quando existem, **gates** do pipeline.
+3. **Evidência antes de tudo.** Cada estado e cada interação guarda o arquivo e o fato que o comprovam. Sem evidência, o estado aparece como **não confirmado**: silêncio não é travamento, e concluir um turno não prova que o resultado chegou ao líder. O raciocínio interno dos modelos nunca é exibido.
+4. **Correlação.** O monitor junta as fontes a cada segundo: agrupa execuções por projeto (inclusive worktrees do mesmo repositório), une a mesma sessão vista por fontes diferentes e decide a coluna de cada tarefa no Kanban.
+5. **Mesmo snapshot para todas as interfaces.** Painel, Escritório, Kanban e TUI consomem o mesmo snapshot por um servidor local autenticado. Trocar de visão não inicia outra coleta.
+
+**Acompanhar outra fonte** é escrever um leitor que devolva o mesmo contrato. A fonte precisa expor, em algum lugar legível localmente, ao menos a identidade de cada agente, a execução a que pertence e o seu estado; quem delegou para quem é desejável. As interfaces funcionam sem mudança.
 
 ## Recursos
 
@@ -21,8 +47,6 @@ Use o **Painel** para consultar agentes, tarefas, saídas e consumo de tokens. A
 - Kanban com as colunas Backlog, Em progresso, Aguardando testes, Em testes, Pronto e Bloqueado, cartões que se movem como se fossem arrastados e **Replay** resumido das transições registradas.
 - Listas laterais com paginação automática, limitadas à altura de cada apresentação.
 - Temas **Atual**, **Aura escuro** e **Claro**, janela compacta e opções de movimento reduzido.
-
-O monitor não inicia, retoma ou interrompe agentes, não altera configurações dos CLIs e não faz chamadas a modelos.
 
 ## Requisitos
 
