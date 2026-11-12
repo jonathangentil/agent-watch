@@ -35,7 +35,7 @@ export class MonitorState {
     this.projectId = typeof saved.projectId === 'string' ? saved.projectId : '';
     this.executionId = typeof saved.executionId === 'string' ? saved.executionId : '';
     this.selections = new Map(Object.entries(saved.selections || {}));
-    this.view = saved.view === 'office' ? 'office' : 'panel';
+    this.setView(saved.view);
     this.filters = {source:'all',active:false,search:'',...saved.filters};
     this.connected = false; this.seen = new Set(); this.initialized = false;
   }
@@ -54,9 +54,10 @@ export class MonitorState {
   get agentId() { return this.selections.get(this.executionId) || ''; }
   get agent() { return this.snapshot.agents.find(a=>a.id===this.agentId && a.execution_id===this.executionId); }
   workers() { return this.snapshot.agents.filter(a=>a.execution_id===this.executionId && a.id!==this.execution?.leader_id); }
-  visibleAgents() { const q=this.filters.search.toLocaleLowerCase(); return this.workers().filter(a=>(this.filters.source==='all'||a.source===this.filters.source)&&(!this.filters.active||active.has(a.status))&&[a.name,a.id,a.source_id,a.task,a.wave,a.model,a.provider,a.effort].join(' ').toLocaleLowerCase().includes(q)); }
+  tasks() { return (this.snapshot.tasks || []).filter(t=>t.execution_id===this.executionId); }
+  visibleAgents() { const q=this.filters.search.toLocaleLowerCase(); return this.workers().filter(a=>(this.filters.source==='all'||a.source===this.filters.source)&&[a.name,a.id,a.source_id,a.task,a.wave,a.model,a.provider,a.effort].join(' ').toLocaleLowerCase().includes(q)); }
   setFilters(filters) { Object.assign(this.filters,filters); this.reconcile(); }
-  setView(view) { this.view=view==='office'?'office':'panel'; }
+  setView(view) { this.view=['office','kanban'].includes(view)?view:'panel'; }
   selectProject(id) { this.projectId=id; this.reconcile(); }
   selectExecution(id) { if(this.executions().some(e=>e.id===id)) {this.executionId=id;this.reconcile();} }
   selectAgent(id) { if(this.snapshot.agents.some(a=>a.id===id&&a.execution_id===this.executionId)) this.selections.set(this.executionId,id); }

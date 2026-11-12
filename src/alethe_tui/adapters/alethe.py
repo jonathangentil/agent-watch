@@ -1,8 +1,9 @@
 """Read Alethe waves and worker artifacts without importing its executor."""
 import os
+import re
 from pathlib import Path
 
-from ..model import Agent, Event, Execution, ScanResult
+from ..model import Agent, Event, Execution, Gate, ScanResult
 from ._io import JsonCache, TextCache, diagnostic, discover, mapping, safe_text, sequence, stable_id, string
 from ._metadata import ROLE_NAMES, identify_role
 from ._usage import reported_tokens
@@ -33,6 +34,30 @@ class AletheAdapter:
         self.cache = JsonCache("alethe")
         self.prompts = TextCache('alethe')
         self.known = set()
+
+    def _gates(self, group, execution_id, result):
+        for path in discover(group, "gate-[0-9][0-9]*.json", "alethe", result.diagnostics):
+            errors = []
+            value = self.cache.read(path, errors, optional=True)
+            valid = (type(value.get("gate")) is int and isinstance(value.get("decision"), str)
+                     and all(isinstance(value.get(key, []), list)
+                             and all(isinstance(item, str) for item in value.get(key, []))
+                             for key in ("developers", "reviewers", "qa")))
+            # JsonCache normally retains the last valid value. Gates fail closed:
+            # a damaged decision must never keep approving a card from the cache.
+            if errors or not valid:
+                result.diagnostics.append(diagnostic("alethe", path, "invalid", "gate ignorado"))
+                continue
+            decision = value["decision"] if value["decision"] in {"APPROVED", "REJECTED", "BLOCKED"} else "unknown"
+            gate_number = value["gate"]
+            result.gates.append(Gate(
+                execution_id=execution_id, number=gate_number, decision=decision,
+                revision=safe_text(value.get("revision")) or None,
+                developers=list(value.get("developers", [])),
+                reviewers=list(value.get("reviewers", [])),
+                qa=list(value.get("qa", [])),
+                at=string(value.get("at")) or None,
+                evidence=f"{path}: gate {gate_number} {decision}"))
 
     def _runner(self, state, path, diagnostics):
         pid = state.get("runnerPid")
@@ -135,6 +160,11 @@ class AletheAdapter:
                     model=safe_text(intent.get("model")) or None, task=task, cwd=cwd,
                     role=role, role_evidence=f'{role_path}: {role_evidence}' if role else '',
                     wave=safe_text(folder.name), effort=safe_text(intent.get('effort')) or None,
+                    contract=intent.get("contract") if intent.get("contract") in ("developer", "reviewer", "qa") else None,
+                    revision=safe_text(intent.get("revision")) or None,
+                    diff_revision=safe_text(outcome.get("diffRevision")) or None,
+                    has_diff=existing(worker_dir / "diff.patch") is not None,
+                    wave_index=int(match[1]) if (match := re.match(r"^(\d+)-", folder.name)) else None,
                     task_path=str(prompt_path) if prompt_path in self.prompts.values else None,
                     started_at=string(values.get("startedAt")) or None,
                     finished_at=string(values.get("finishedAt")) or None,
@@ -164,6 +194,7 @@ class AletheAdapter:
             result.agents.extend(agents)
         for execution_id, waves in groups.items():
             group, meta, plan, state, _, _, lead_id = waves[0]
+            self._gates(group, execution_id, result)
             agents = [agent for wave in waves for agent in wave[5]]
             project_ids = list(dict.fromkeys(agent.project_id for agent in agents))
             cwd = next((agent.cwd for agent in agents if agent.cwd), "")

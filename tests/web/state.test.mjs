@@ -78,3 +78,44 @@ test('active-only combined with source requires activity in that source for mixe
  s.setFilters({active:true,source:'claude'});assert.equal(s.executions().length,0);
  s.setFilters({source:'codex'});assert.deepEqual(s.executions().map(e=>e.id),['mixed']);
 });
+
+test('kanban view persists in context and survives reload',()=>{
+ const s=new MonitorState();s.apply(snapshot());s.selectProject('p1');s.selectExecution('e1');s.selectAgent('a');s.setFilters({source:'codex',active:true,search:'mesmo'});
+ const before=s.context();s.setView('kanban');
+ assert.deepEqual(s.context(),{...before,view:'kanban'});
+ const restored=new MonitorState(s.context());restored.apply(s.snapshot);
+ assert.equal(restored.view,'kanban');assert.deepEqual(restored.context(),s.context());
+ s.setView('panel');s.setView('kanban');assert.equal(s.agentId,'a');
+ s.setView('invalid');assert.equal(s.view,'panel');
+ assert.equal(new MonitorState({view:'invalid'}).view,'panel');
+});
+
+test('tasks() filters focused execution and tolerates missing tasks',()=>{
+ const s=new MonitorState();assert.deepEqual(s.tasks(),[]);s.apply(snapshot());assert.deepEqual(s.tasks(),[]);
+ const tasks=[{id:'t1',execution_id:'e1'},{id:'t2',execution_id:'e2'},{id:'t3',execution_id:'e1'}];
+ s.apply(snapshot({tasks}));s.selectExecution('e1');assert.deepEqual(s.tasks().map(t=>t.id),['t1','t3']);
+ s.selectExecution('e2');assert.deepEqual(s.tasks().map(t=>t.id),['t2']);assert.equal(s.snapshot.tasks.length,3);
+ s.apply(snapshot());assert.deepEqual(s.tasks(),[]);
+});
+
+test('active-only filters executions but keeps completed and failed agents in focused execution',()=>{
+ const s=new MonitorState();
+ s.apply(snapshot({executions:[
+  {id:'e1',source:'alethe',project_id:'p1',status:'running'},
+  {id:'e2',source:'alethe',project_id:'p1',status:'succeeded'},
+ ],agents:[
+  agent('busy','e1',{task:'foco',source:'codex',status:'running'}),
+  agent('done','e1',{task:'foco',source:'codex',status:'succeeded'}),
+  agent('failed','e1',{task:'foco',source:'codex',status:'failed'}),
+  agent('claude','e1',{task:'foco',source:'claude',status:'turn_complete'}),
+  agent('foreign','e2',{status:'succeeded'}),
+ ]}));
+ s.selectExecution('e1');s.selectAgent('done');s.setFilters({active:true});
+ assert.deepEqual(s.executions().map(e=>e.id),['e1']);
+ assert.deepEqual(s.visibleAgents().map(a=>a.id),['busy','done','failed','claude']);
+ assert.equal(s.agentId,'done');
+ s.setFilters({source:'codex',search:'foco'});
+ assert.deepEqual(s.visibleAgents().map(a=>a.id),['busy','done','failed']);
+ s.setFilters({search:'failed'});assert.deepEqual(s.visibleAgents().map(a=>a.id),['failed']);
+ s.setFilters({search:'inexistente'});assert.deepEqual(s.visibleAgents(),[]);
+});
