@@ -4,9 +4,11 @@ Acompanhe orquestrações **Alethe** e subagentes do **Claude Code** e do **Code
 
 Use o **Painel** para consultar agentes, tarefas, saídas e consumo de tokens. Alterne para o **Escritório** para acompanhar a mesma execução em uma sala visual, com estados e interações ligados aos eventos registrados pelas fontes, ou para o **Kanban** para ver cada tarefa na coluna comprovada pelos artefatos. A interface de terminal também está disponível.
 
-![Escritório do Agent Watch com dados fictícios](docs/images/office.png)
+![Escritório do Agent Watch com dados fictícios: agentes na sala e cartas de tarefas entre eles](docs/images/office.gif)
 
-*Demonstração com dados fictícios. Nenhum agente ou modelo foi iniciado para produzir as imagens. [Ver o Painel](docs/images/panel.png) · [Ver o Kanban](docs/images/kanban.png).*
+![Kanban do Agent Watch com dados fictícios: cartão mudando de coluna, painel de detalhes e replay em 2×](docs/images/kanban.gif)
+
+*Demonstração com dados fictícios (`--demo`). Nenhum agente ou modelo foi iniciado para produzir as imagens. Capturas estáticas: [Escritório](docs/images/office.png) · [Painel](docs/images/panel.png) · [Kanban](docs/images/kanban.png).*
 
 ## Recursos
 
