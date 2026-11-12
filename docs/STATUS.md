@@ -1,4 +1,31 @@
-# Estado da entrega — 2026-11-10
+# Estado da entrega — 2026-11-12
+
+V2 entregue: aba **Kanban** com replay, além do Painel e do Escritório da V1.
+
+## Entrega da V2
+
+- Terceira aba **Kanban** na janela gráfica e `--kanban` na CLI; o login preserva `view=kanban`.
+- Tarefas da execução em foco nas colunas Backlog, Em progresso, Aguardando testes, Em testes, Pronto e Bloqueado, decididas por evidência em `board.build_tasks` e publicadas como `tasks` no snapshot (`version` continua 1).
+- Leitor da Alethe expõe contrato, revisão declarada, revisão do diff, existência do `diff.patch` (sem lê-lo), índice da onda e os `gate-NN.json`. O vínculo entre Developer e testador é deduzido pela onda e confirmado pelo gate; gate com revisão divergente não aprova nem bloqueia o cartão.
+- Rodadas de correção mantêm os cartões rejeitados em Bloqueado, esmaecidos e marcados como substituídos.
+- Cartões detalhados, painel de detalhes que começa fechado (botão e `Esc`), evidência da coluna e testador selecionável pelo teclado.
+- Movimento FLIP de cartão arrastado: levantar, viajar 780 ms, vizinhos em 280 ms, 140 ms entre movimentos, até 6 animações por snapshot; histórico não anima; Pausar e Movimento reduzido compartilhados com o Escritório.
+- **Replay** das transições registradas: lotes de 1 s real, pausa de até 0,5 s depois que o último cartão do lote assenta, 1×/2×/4×, barra de posição, relógio no horário real e retorno ao vivo. No replay, os cartões mostram só dados que não dependem do momento.
+- **Apenas ativos** passou a filtrar só as execuções; os agentes concluídos ou com falha da execução em foco continuam visíveis.
+
+## Verificação da V2
+
+- **200 testes Python** e **77 testes JavaScript** em 8 arquivos.
+- **83 verificações no Chromium** contra a demonstração, em `tests/web/kanban-*smoke.mjs`: colunas, cartões, texto malicioso inerte, foco, acessibilidade, keyframes e durações, destino fora da área, preferências, barra lateral, três temas e quatro larguras sem rolagem lateral, e replay estável em três execuções seguidas.
+- `tests/web/browser-smoke.mjs` atualizado para os novos módulos; continua aprovado.
+- Leitura real somente de metadados com o código atual: 6 projetos, 20 execuções e 161 tarefas (150 Alethe, 8 Claude, 3 Codex); a última transição coincide com a coluna em todas as tarefas.
+- Implementação orquestrada pela Alethe, com gates de Reviewer e QA independentes em cada etapa: etapa 1 APPROVED em `rev-8098586ecfe57d03`, etapa 2 em `rev-1c812f572da4477a` (26/26 critérios) e etapa 3 em `rev-4b44d39e87718a43` (40/40). Os defeitos encontrados nas revisões e no Chromium foram corrigidos com testes de regressão.
+
+## Limites conhecidos da V2
+
+As colunas de teste só se aplicam ao pipeline da Alethe. O replay reproduz apenas transições com evidência nos artefatos e omite nos cartões o que depende do momento. Com horário ausente, a transição entra na ordem lógica, marcada como sem horário.
+
+# Estado da V1 — 2026-11-10
 
 V1 implementada e instalada localmente, com o comando local `./run.sh`.
 
@@ -18,7 +45,6 @@ V1 implementada e instalada localmente, com o comando local `./run.sh`.
 - `.env` local com múltiplas pastas de projetos (`AGENT_WATCH_PROJECT_DIRS`); `.env.example` versionável.
 - Configuração de raízes adicionais, demonstração sintética e servidor local autenticado.
 - Consumo de tokens por agente e total da execução no Painel, incluindo cache informado sem duplicação e totais parciais qualificados; saída com altura de 420 px e fonte preservada.
-- Kanban permanece no roadmap da V2, fora desta entrega.
 
 ## Verificação
 

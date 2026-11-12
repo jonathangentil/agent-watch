@@ -18,7 +18,7 @@ try{
   if(url.pathname==='/api/snapshot')return route.fulfill({status:offline?503:200,contentType:'application/json',body:JSON.stringify(snap)});
   if(url.pathname==='/api/detail'){details.push([url.searchParams.get('agent'),url.searchParams.get('kind')]);return route.fulfill({contentType:'application/json',body:JSON.stringify({text:'<script>window.injected=true</script>\n\u001b[31mPUBLIC\u001b[0m<think>PRIVATE</think>'})});}
   const name=url.pathname==='/'?'index.html':url.pathname.replace('/assets/','');
-  if(!['index.html','app.js','styles.css','themes.css','events.css','theme.mjs','state.mjs','scene.mjs'].includes(name))return route.fulfill({status:404,body:''});
+  if(!['index.html','app.js','styles.css','themes.css','events.css','theme.mjs','state.mjs','scene.mjs','board.mjs','kanban.mjs','kanban.css','timeline.mjs','replay.mjs'].includes(name))return route.fulfill({status:404,body:''});
   return route.fulfill({contentType:name.endsWith('.css')?'text/css':name.endsWith('.html')?'text/html':'text/javascript',body:await readFile(new URL(name,root))});
  });
  await page.goto('http://alethe.test/?view=office');
@@ -47,7 +47,7 @@ try{
  await page.waitForFunction(()=>document.getElementById('output').textContent.includes('PUBLIC'));
  assert.equal(await page.locator('#output script').count(),0);assert.equal(await page.evaluate(()=>window.injected),undefined);
  assert.doesNotMatch(await page.locator('#output').textContent(),/PRIVATE|\x1b/);
- await page.locator('[data-kind="result"]').click();await page.waitForTimeout(150);assert.ok(details.some(([id,kind])=>id==='w7'&&kind==='result'));
+ await page.locator('#agent-details [data-kind="result"]').click();await page.waitForTimeout(150);assert.ok(details.some(([id,kind])=>id==='w7'&&kind==='result'));
  await page.locator('[data-view="office"]').click();assert.match(await page.locator('#visible-count').textContent(),/8 agentes/);
  snap.events.push({id:'new',kind:'delegated',execution_id:'e1',actor_id:'lead',target_id:'w0',evidence:'registro sintético'});
  await page.locator('#refresh').click();await page.waitForSelector('.packet');
