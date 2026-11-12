@@ -38,6 +38,11 @@ class Agent:
     effort: str | None = None
     task_path: str | None = None
     tokens_partial: bool = False
+    contract: str | None = None
+    revision: str | None = None
+    diff_revision: str | None = None
+    has_diff: bool | None = None
+    wave_index: int | None = None
 
 
 @dataclass
@@ -70,9 +75,53 @@ class Event:
     evidence: str = ""
 
 
+COLUMNS = ("backlog", "in_progress", "awaiting_tests", "testing", "done", "blocked")
+
+
+@dataclass
+class Gate:
+    """Decisão registrada pelo pipeline; as listas guardam source_id de workers."""
+    execution_id: str
+    number: int
+    decision: str
+    revision: str | None = None
+    developers: list[str] = field(default_factory=list)
+    reviewers: list[str] = field(default_factory=list)
+    qa: list[str] = field(default_factory=list)
+    at: str | None = None
+    evidence: str = ""
+
+
+@dataclass
+class Transition:
+    column: str
+    at: str | None
+    evidence: str
+
+
+@dataclass
+class Task:
+    id: str
+    execution_id: str
+    project_id: str
+    agent_id: str
+    title: str
+    column: str
+    column_evidence: str
+    badges: list[str] = field(default_factory=list)
+    testers: list[str] = field(default_factory=list)
+    revision: str | None = None
+    gate: int | None = None
+    gate_decision: str | None = None
+    superseded_by_wave: int | None = None
+    updated_at: str | None = None
+    transitions: list[Transition] = field(default_factory=list)
+
+
 @dataclass
 class ScanResult:
     agents: list[Agent] = field(default_factory=list)
     executions: list[Execution] = field(default_factory=list)
     events: list[Event] = field(default_factory=list)
     diagnostics: list[dict] = field(default_factory=list)
+    gates: list[Gate] = field(default_factory=list)
