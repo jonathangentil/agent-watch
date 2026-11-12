@@ -3,6 +3,8 @@ import {buildScene,animateEvent,clearEventAnimations} from '/assets/scene.mjs';
 import {loadTheme,saveTheme,themeId} from '/assets/theme.mjs';
 import {columnMap,planMoves,pipelineActive,badgeLabel,taskTitle} from '/assets/board.mjs';
 import {renderBoard,measure,animateMoves,cancelMoves} from '/assets/kanban.mjs';
+import {buildTimeline,boardAt} from '/assets/timeline.mjs';
+import {createReplay,replayCardData,replayEffects,replayClock,startReplaySession,setReplayPresentation} from '/assets/replay.mjs';
 const $=id=>document.getElementById(id);
 let themeStorage;try{themeStorage=localStorage}catch{}
 try{$('event-mail').checked=themeStorage?.getItem('agent-watch-event-mail')!=='false';}catch{/* Enabled by default without storage. */}
@@ -20,6 +22,7 @@ if(params.get('agent'))state.selections.set(state.executionId,params.get('agent'
 if(params.has('compact'))document.body.classList.add('compact');
 let kind='output',scene=null,paused=false,detailController=null,detailKey='',busy=false;
 let connectionError='',lastSuccess=null,renderedExecution=null,renderedView=null,kanbanDetailOpen=false,kanbanDetailTrigger=null;
+let replay=null;
 const signatures=new Map();
 const sidebars={panel:{page:0,selected:null,ids:''},office:{page:0,selected:null,ids:''},kanban:{page:0,selected:null,ids:''}};
 const motion=matchMedia('(prefers-reduced-motion: reduce)');$('reduce').checked=motion.matches;
@@ -56,7 +59,37 @@ function updateSidebar(view){
   pager.classList.toggle('single-page',pages.length===1);
 }
 function updateSidebars(){for(const view of ['panel','office','kanban'])updateSidebar(view);}
+function drawBoard(tasks,agents=state.snapshot.agents,pipeline=pipelineActive(agents,state.executionId)){renderBoard($('board'),{tasks,agents,selectedAgentId:state.agentId,pipeline,onSelect:task=>selectAgent(task.agent_id),onSelectTester:selectAgent});}
+function replayControls(){
+  $('replay-start').disabled=paused||!state.tasks().some(task=>task.transitions?.length);$('replay-start').hidden=Boolean(replay);$('replay-bar').hidden=!replay;
+  if(!replay)return;
+  const controller=replay.controller,clock=replayClock(replay.timeline,controller.index);
+  $('replay-position').max=String(replay.timeline.steps.length-1);$('replay-position').value=String(controller.index);
+  $('replay-position').setAttribute('aria-valuetext',safeText(`${controller.index<0?'Início':`Passo ${controller.index+1} de ${replay.timeline.steps.length}`} · ${clock}`));
+  $('replay-play').setAttribute('aria-pressed',String(controller.playing));text('replay-play',controller.playing?'Ⅱ Pausar replay':'▶ Reproduzir');
+  text('replay-clock',clock);
+  for(const button of document.querySelectorAll('[data-replay-speed]'))button.setAttribute('aria-pressed',String(Number(button.dataset.replaySpeed)===replay.speed));
+}
+function replayAnimations(action){for(const animation of $('board').getAnimations({subtree:true})){animation.playbackRate=replay.speed;if(action)animation[action]();}}
+function applyReplay(index,animate){
+  cancelMoves($('board'));const before=measure($('board')),columns=boardAt(replay.timeline,index);
+  const view=replayCardData(replay.tasks,replay.agents,columns);drawBoard(view.tasks,view.agents,replay.pipeline);setReplayPresentation($('board'),true);
+  const effects=replayEffects(replay.timeline.steps[index],animate,$('reduce').checked||motion.matches);
+  animateMoves($('board'),before,{animated:effects.animated,instant:[]},{paused});
+  const flashes=new Set(effects.flash);for(const node of $('board').querySelectorAll('[data-task-id]'))if(flashes.has(node.dataset.taskId))node.classList.add('flash');
+  replayAnimations();
+}
+function startReplay(){
+  if(paused||replay)return;
+  startReplaySession({mount:onEnd=>{
+    const tasks=state.tasks().map(task=>({...task})),timeline=buildTimeline(tasks);
+    cancelMoves($('board'));replay={tasks,timeline,agents:state.snapshot.agents,executionId:state.executionId,pipeline:pipelineActive(state.snapshot.agents,state.executionId),speed:1};
+    replay.controller=createReplay({timeline,apply:applyReplay,schedule:(fn,ms)=>setTimeout(fn,ms),cancel:handle=>clearTimeout(handle),now:()=>performance.now(),onTick:replayControls,onEnd});
+    drawBoard([],replay.agents,replay.pipeline);replayControls();return replay.controller;
+  },restore:()=>{replay=null;cancelMoves($('board'));setReplayPresentation($('board'),false);render();},focusPlay:()=>$('replay-play').focus({preventScroll:true}),focusStart:()=>$('replay-start').focus({preventScroll:true})});
+}
 function render(){
+  if(replay&&(replay.executionId!==state.executionId||state.view!=='kanban')){replay.controller.stop();return measure($('board'));}
   const before=measure($('board'));if(renderedExecution!==state.executionId||renderedView!==state.view){cancelMoves($('board'));kanbanDetailOpen=false;kanbanDetailTrigger=null;}renderedExecution=state.executionId;renderedView=state.view;persist();const snap=state.snapshot,run=state.execution,agent=state.agent;
   document.body.classList.toggle('disconnected',!state.connected);
   text('connection',(snap.demo?'DEMONSTRAÇÃO · dados fictícios · ':'')+(state.connected?`● Acompanhando · atualizado ${lastSuccess?.toLocaleTimeString('pt-BR')||'agora'}`:`○ Desconectado · ${connectionError||'monitor indisponível'}${lastSuccess?' · mantendo última leitura válida':''}`));
@@ -110,7 +143,7 @@ function render(){
   const diagnostics=snap.diagnostics;text('diagnostic-summary',`Fontes e diagnósticos · ${diagnostics.length} registros${diagnostics.some(d=>!['ok','available'].includes(d.status))?' · verificar avisos':''}`);
   changed('diagnostics',diagnostics,()=>{$('diagnostics').replaceChildren(...(diagnostics.length?diagnostics.map(d=>el('li',`${d.source} · ${d.status} · ${d.path||'raiz não informada'} · ${d.message||'sem mensagem'}`)):[el('li','Nenhum diagnóstico informado pelo monitor.') ]));});
   text('kanban-heading',run?`${run.title} · ${state.tasks().length} tarefas`:'Aguardando descoberta');
-  renderBoard($('board'),{tasks:state.tasks(),agents:snap.agents,selectedAgentId:state.agentId,pipeline:pipelineActive(snap.agents,state.executionId),onSelect:task=>selectAgent(task.agent_id),onSelectTester:selectAgent});
+  if(!replay)drawBoard(state.tasks());replayControls();
   $('kanban-detail').hidden=!kanbanDetailOpen;document.querySelector('.kanban-content').classList.toggle('detail-open',kanbanDetailOpen);
   const task=state.tasks().find(t=>t.agent_id===state.agentId)||state.tasks().find(t=>t.testers?.includes(state.agentId));
   text('kanban-detail-name',task?`${taskTitle(task)} · ${agent?.name||state.agentId}`:agent?.name||'Nenhum agente selecionado');text('kanban-evidence',task?.column_evidence||agent?.evidence||'');
@@ -118,7 +151,7 @@ function render(){
   updateSidebars();return before;
 }
 function eventDescription(event){const labels={delegated:'delegou tarefa',message:'enviou mensagem',result_delivered:'entregou resultado',result_available:'resultado disponível',started:'início registrado',tool:'ferramenta pública',failed:'falha registrada',waiting:'espera registrada'};return `${displayName(event.actor_id)} (${event.actor_id||'ator não informado'}) · ${labels[event.kind]||event.kind}${event.target_id?` → ${displayName(event.target_id)} (${event.target_id})`:''}${event.label?` · ${event.label}`:''}`;}
-function applyMotion(){document.body.classList.toggle('paused',paused);document.body.classList.toggle('reduced',$('reduce').checked);$('scene').classList.toggle('charming',$('charm').checked);$('pause').setAttribute('aria-pressed',String(paused));text('pause',paused?'▷ Retomar animações':'Ⅱ Pausar animações');if($('reduce').checked||paused||!$('event-mail').checked)clearEventAnimations(scene);if($('reduce').checked||paused)cancelMoves($('board'));}
+function applyMotion(){document.body.classList.toggle('paused',paused);document.body.classList.toggle('reduced',$('reduce').checked);$('scene').classList.toggle('charming',$('charm').checked);$('pause').setAttribute('aria-pressed',String(paused));text('pause',paused?'▷ Retomar animações':'Ⅱ Pausar animações');if($('reduce').checked||paused||!$('event-mail').checked)clearEventAnimations(scene);if($('reduce').checked||paused)cancelMoves($('board'));if(paused&&replay)replay.controller.stop();replayControls();}
 async function loadDetail(){
   if(state.view==='kanban'&&!kanbanDetailOpen){detailController?.abort();detailController=null;return;}
   const target=state.view==='kanban'?'kanban-output':'output',agent=state.agent,key=`${target}:${agent?.id||''}:${kind}`;
@@ -140,7 +173,7 @@ async function loadDetail(){
 }
 async function poll(){
   if(busy)return;busy=true;const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),4500);
-  try{const response=await fetch('/api/snapshot',{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const previousExecution=state.executionId,previousColumns=state.initialized?columnMap(state.tasks()):null;const effects=state.apply(await response.json()),moves=planMoves(previousColumns,state.tasks());lastSuccess=new Date();connectionError='';const before=render();if(state.view==='kanban'&&previousExecution===state.executionId)animateMoves($('board'),before,moves,{reduced:$('reduce').checked||motion.matches,paused});for(const event of effects){if(event.execution_id!==state.executionId)continue;text('last-event',eventDescription(event));if(state.view==='office'&&!paused&&$('event-mail').checked)animateEvent(scene,event,$('reduce').checked);}if(!detailController)void loadDetail();}
+  try{const response=await fetch('/api/snapshot',{method:'GET',credentials:'same-origin',cache:'no-store',signal:controller.signal});if(!response.ok)throw new Error(`HTTP ${response.status}`);const previousExecution=state.executionId,previousColumns=state.initialized?columnMap(state.tasks()):null;const effects=state.apply(await response.json()),moves=planMoves(previousColumns,state.tasks());lastSuccess=new Date();connectionError='';const before=render();if(!replay&&state.view==='kanban'&&previousExecution===state.executionId)animateMoves($('board'),before,moves,{reduced:$('reduce').checked||motion.matches,paused});for(const event of effects){if(event.execution_id!==state.executionId)continue;text('last-event',eventDescription(event));if(state.view==='office'&&!paused&&$('event-mail').checked)animateEvent(scene,event,$('reduce').checked);}if(!detailController)void loadDetail();}
   catch(error){state.disconnect();connectionError=controller.signal.aborted?'tempo de resposta esgotado':error.message;detailController?.abort();detailController=null;render();}
   finally{clearTimeout(timeout);busy=false;}
 }
@@ -153,6 +186,10 @@ $('pause').onclick=()=>{paused=!paused;applyMotion();};$('charm').onchange=apply
 $('event-mail').onchange=()=>{try{themeStorage?.setItem('agent-watch-event-mail',String($('event-mail').checked));}catch{/* Preference remains usable without storage. */}applyMotion();};
 $('popout').onclick=()=>{persist();const url=new URL(location.origin+location.pathname);url.searchParams.set('compact','1');url.searchParams.set('view',state.view);url.searchParams.set('execution',state.executionId);url.searchParams.set('project',state.projectId);url.searchParams.set('agent',state.agentId);if(!window.open(url.href,'alethe-monitor-compact','width=860,height=780,resizable=yes,scrollbars=yes'))text('popout','Janela bloqueada pelo navegador');};
 $('kanban-close').onclick=closeKanbanDetail;
+$('replay-start').onclick=startReplay;$('replay-live').onclick=()=>replay?.controller.stop();
+$('replay-play').onclick=()=>{if(!replay)return;const controller=replay.controller;if(controller.playing){controller.pause();replayAnimations('pause');}else{replayAnimations('play');controller.play();}replayControls();};
+$('replay-position').oninput=()=>replay?.controller.seek(Number($('replay-position').value));
+for(const button of document.querySelectorAll('[data-replay-speed]'))button.onclick=()=>{if(!replay)return;replay.speed=Number(button.dataset.replaySpeed);replay.controller.setSpeed(replay.speed);replayAnimations();replayControls();};
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&state.view==='kanban'&&kanbanDetailOpen){e.preventDefault();closeKanbanDetail();return;}if(['INPUT','SELECT','TEXTAREA','BUTTON'].includes(e.target.tagName)||e.ctrlKey||e.altKey||e.metaKey)return;if(e.key==='/'){e.preventDefault();$('search').focus();}else if(e.key==='a'){$('active').checked=!$('active').checked;filter();}else if(e.key==='r')void poll();else if(e.key==='l'){const tabs=['output','task','result','error'];kind=tabs[(tabs.indexOf(kind)+1)%tabs.length];render();void loadDetail();}});
 for(const view of ['panel','office','kanban']){
   $(`${view}-run-pages`).querySelector('[data-page-previous]').onclick=()=>{sidebars[view].page--;updateSidebar(view);};
